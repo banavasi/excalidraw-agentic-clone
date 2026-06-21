@@ -10,6 +10,7 @@ import type { AppState, BinaryFileData } from "@excalidraw/excalidraw/types";
 
 import { STORAGE_KEYS } from "./app_constants";
 import { LocalData } from "./data/LocalData";
+import { getActiveWorkboardId, loadWorkboardData } from "./workboards/data";
 
 const EVENT_REQUEST_SCENE = "REQUEST_SCENE";
 
@@ -175,13 +176,21 @@ export const ExcalidrawPlusIframeExport = () => {
             throw new ExcalidrawError("Failed to verify JWT");
           }
 
+          // read the active workboard's scene from IndexedDB (multi-board
+          // storage). This route renders standalone and never mounts the editor,
+          // so migration may not have run yet — fall back to the legacy
+          // single-canvas localStorage keys (kept for exactly this reason).
+          const activeBoardId = getActiveWorkboardId();
+          const boardData = activeBoardId
+            ? await loadWorkboardData(activeBoardId)
+            : null;
           const parsedSceneData: MESSAGE_SCENE_DATA = await parseSceneData({
-            rawAppStateString: localStorage.getItem(
-              STORAGE_KEYS.LOCAL_STORAGE_APP_STATE,
-            ),
-            rawElementsString: localStorage.getItem(
-              STORAGE_KEYS.LOCAL_STORAGE_ELEMENTS,
-            ),
+            rawAppStateString: boardData?.appState
+              ? JSON.stringify(boardData.appState)
+              : localStorage.getItem(STORAGE_KEYS.LOCAL_STORAGE_APP_STATE),
+            rawElementsString: boardData?.elements
+              ? JSON.stringify(boardData.elements)
+              : localStorage.getItem(STORAGE_KEYS.LOCAL_STORAGE_ELEMENTS),
           });
 
           event.source!.postMessage(parsedSceneData, {

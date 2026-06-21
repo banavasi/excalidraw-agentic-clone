@@ -40,6 +40,7 @@ import type { MaybePromise } from "@excalidraw/common/utility-types";
 
 import { appJotaiStore, atom } from "../app-jotai";
 import { SAVE_TO_LOCAL_STORAGE_TIMEOUT, STORAGE_KEYS } from "../app_constants";
+import { getBoardVersionKey, saveWorkboardData } from "../workboards/data";
 
 import { FileManager } from "./FileManager";
 import { FileStatusStore } from "./fileStatusStore";
@@ -70,7 +71,13 @@ class LocalFileManager extends FileManager {
   };
 }
 
-const saveDataStateToLocalStorage = (
+/**
+ * Persists a single board's scene data (non-deleted elements + cleaned
+ * appState) to the workboards IndexedDB store and bumps the board's per-board
+ * tab-sync stamp. Replaces the legacy single-canvas localStorage write.
+ */
+const saveBoardDataToStorage = async (
+  boardId: string,
   elements: readonly ExcalidrawElement[],
   appState: AppState,
 ) => {
@@ -87,20 +94,16 @@ const saveDataStateToLocalStorage = (
       _appState.openSidebar = null;
     }
 
-    localStorage.setItem(
-      STORAGE_KEYS.LOCAL_STORAGE_ELEMENTS,
-      JSON.stringify(getNonDeletedElements(elements)),
-    );
-    localStorage.setItem(
-      STORAGE_KEYS.LOCAL_STORAGE_APP_STATE,
-      JSON.stringify(_appState),
-    );
-    updateBrowserStateVersion(STORAGE_KEYS.VERSION_DATA_STATE);
+    await saveWorkboardData(boardId, {
+      elements: getNonDeletedElements(elements),
+      appState: _appState,
+    });
+    updateBrowserStateVersion(getBoardVersionKey(boardId));
     if (localStorageQuotaExceeded) {
       appJotaiStore.set(localStorageQuotaExceededAtom, false);
     }
   } catch (error: any) {
-    // Unable to access window.localStorage
+    // Unable to access storage
     console.error(error);
     if (isQuotaExceededError(error) && !localStorageQuotaExceeded) {
       appJotaiStore.set(localStorageQuotaExceededAtom, true);
@@ -114,40 +117,138 @@ const isQuotaExceededError = (error: any) => {
 
 type SavingLockTypes = "collaboration";
 
+type DebouncedSaver = ((
+  elements: readonly ExcalidrawElement[],
+  appState: AppState,
+  files: BinaryFiles,
+  onFilesSaved: () => void,
+) => void) & { flush: () => void; cancel: () => void };
+
 export class LocalData {
-  private static _save = debounce(
-    async (
-      elements: readonly ExcalidrawElement[],
-      appState: AppState,
-      files: BinaryFiles,
-      onFilesSaved: () => void,
-    ) => {
-      saveDataStateToLocalStorage(elements, appState);
+  /**
+   * One debounce timer PER board. A single shared debounce would mean that
+   * scheduling a save for board B clears board A's pending save (the debounce
+   * has a single handle) — which silently drops edits made to A during a board
+   * switch. Per-board savers each carry their own board's args, so a pending
+   * write always lands on the correct board.
+   */
+  private static _savers = new Map<string, DebouncedSaver>();
 
-      await this.fileStorage.saveFiles({
-        elements,
-        files,
-      });
-      onFilesSaved();
-    },
-    SAVE_TO_LOCAL_STORAGE_TIMEOUT,
-  );
+  private static getSaver(boardId: string): DebouncedSaver {
+    let saver = this._savers.get(boardId);
+    if (!saver) {
+      saver = debounce(
+        async (
+          elements: readonly ExcalidrawElement[],
+          appState: AppState,
+          files: BinaryFiles,
+          onFilesSaved: () => void,
+        ) => {
+          await saveBoardDataToStorage(boardId, elements, appState);
+          await this.fileStorage.saveFiles({ elements, files });
+          onFilesSaved();
+        },
+        SAVE_TO_LOCAL_STORAGE_TIMEOUT,
+      ) as DebouncedSaver;
+      this._savers.set(boardId, saver);
+    }
+    return saver;
+  }
 
-  /** Saves DataState, including files. Bails if saving is paused */
+  /** Saves DataState for the given board, including files. Bails if saving is
+   * paused or there is no active board yet. */
   static save = (
+    boardId: string | null,
     elements: readonly ExcalidrawElement[],
     appState: AppState,
     files: BinaryFiles,
     onFilesSaved: () => void,
   ) => {
     // we need to make the `isSavePaused` check synchronously (undebounced)
-    if (!this.isSavePaused()) {
-      this._save(elements, appState, files, onFilesSaved);
+    if (boardId && !this.isSavePaused()) {
+      this.getSaver(boardId)(elements, appState, files, onFilesSaved);
     }
   };
 
   static flushSave = () => {
-    this._save.flush();
+    for (const saver of this._savers.values()) {
+      saver.flush();
+    }
+  };
+
+  /** Cancels pending debounced saves. Pass a `boardId` to cancel only that
+   * board's pending write (e.g. before deleting it, or before persisting the
+   * outgoing board on a switch); omit to cancel all. */
+  static cancelSave = (boardId?: string) => {
+    if (boardId) {
+      this._savers.get(boardId)?.cancel();
+    } else {
+      for (const saver of this._savers.values()) {
+        saver.cancel();
+      }
+    }
+  };
+
+  /** Immediately (awaited, undebounced) persists a board's scene + files.
+   * Used by the board-switch flow to guarantee the outgoing board is saved
+   * before the incoming board is loaded. */
+  static saveImmediately = async (
+    boardId: string,
+    elements: readonly ExcalidrawElement[],
+    appState: AppState,
+    files: BinaryFiles,
+  ) => {
+    await saveBoardDataToStorage(boardId, elements, appState);
+    await this.fileStorage.saveFiles({ elements, files });
+  };
+
+  /** Synchronously mirrors the active board's scene to localStorage. IndexedDB
+   * writes don't reliably complete during unload, so this is the durable
+   * crash/unload snapshot; {@link readRecovery} prefers it on load when newer
+   * than the last persisted IDB save (compared via the board's version stamp).
+   * Binary files are NOT mirrored (they already live durably in the files
+   * store), only element + appState. */
+  static writeRecovery = (
+    boardId: string,
+    elements: readonly ExcalidrawElement[],
+    appState: AppState,
+  ) => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEYS.WORKBOARDS_RECOVERY,
+        JSON.stringify({
+          boardId,
+          elements: getNonDeletedElements(elements),
+          appState: clearAppStateForLocalStorage(appState),
+          ts: Date.now(),
+        }),
+      );
+    } catch (error: any) {
+      console.error(error);
+    }
+  };
+
+  static readRecovery = (): {
+    boardId: string;
+    elements: ExcalidrawElement[];
+    appState: AppState;
+    ts: number;
+  } | null => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.WORKBOARDS_RECOVERY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (error: any) {
+      console.error(error);
+      return null;
+    }
+  };
+
+  static clearRecovery = () => {
+    try {
+      localStorage.removeItem(STORAGE_KEYS.WORKBOARDS_RECOVERY);
+    } catch (error: any) {
+      console.error(error);
+    }
   };
 
   private static locker = new Locker<SavingLockTypes>();

@@ -7,6 +7,7 @@ import {
   useEditorInterface,
   ExcalidrawAPIProvider,
   useExcalidrawAPI,
+  exportToBlob,
 } from "@excalidraw/excalidraw";
 import { trackEvent } from "@excalidraw/excalidraw/analytics";
 import { getDefaultAppState } from "@excalidraw/excalidraw/appState";
@@ -34,7 +35,7 @@ import {
 } from "@excalidraw/common";
 import polyfill from "@excalidraw/excalidraw/polyfill";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { loadFromBlob } from "@excalidraw/excalidraw/data/blob";
+import { getDataURL, loadFromBlob } from "@excalidraw/excalidraw/data/blob";
 import { t } from "@excalidraw/excalidraw/i18n";
 
 import {
@@ -54,6 +55,7 @@ import {
   restoreElements,
 } from "@excalidraw/excalidraw/data/restore";
 import { newElementWith } from "@excalidraw/element";
+import { getNonDeletedElements } from "@excalidraw/element";
 import { isInitializedImageElement } from "@excalidraw/element";
 import clsx from "clsx";
 import {
@@ -64,6 +66,7 @@ import {
 import type { RemoteExcalidrawElement } from "@excalidraw/excalidraw/data/reconcile";
 import type { RestoredDataState } from "@excalidraw/excalidraw/data/restore";
 import type {
+  ExcalidrawElement,
   FileId,
   NonDeletedExcalidrawElement,
   OrderedExcalidrawElement,
@@ -116,10 +119,7 @@ import {
 
 import { updateStaleImageStatuses } from "./data/FileManager";
 import { FileStatusStore } from "./data/fileStatusStore";
-import {
-  importFromLocalStorage,
-  importUsernameFromLocalStorage,
-} from "./data/localStorage";
+import { importUsernameFromLocalStorage } from "./data/localStorage";
 
 import { loadFilesFromFirebase } from "./data/firebase";
 import {
@@ -128,7 +128,10 @@ import {
   LocalData,
   localStorageQuotaExceededAtom,
 } from "./data/LocalData";
-import { isBrowserStorageStateNewer } from "./data/tabSync";
+import {
+  isBrowserStorageStateNewer,
+  markBrowserStateVersionSeen,
+} from "./data/tabSync";
 import { ShareDialog, shareDialogStateAtom } from "./share/ShareDialog";
 import CollabError, { collabErrorIndicatorAtom } from "./collab/CollabError";
 import { useHandleAppTheme } from "./useHandleAppTheme";
@@ -146,6 +149,28 @@ import "./index.scss";
 
 import { ExcalidrawPlusPromoBanner } from "./components/ExcalidrawPlusPromoBanner";
 import { AppSidebar } from "./components/AppSidebar";
+import {
+  WorkboardSidebar,
+  WORKBOARDS_SIDEBAR_NAME,
+} from "./workboards/WorkboardSidebar";
+import {
+  createWorkboard,
+  deleteWorkboard,
+  duplicateWorkboard,
+  ensureWorkboardIndexSync,
+  getBoardVersionKey,
+  listAllReferencedFileIds,
+  loadWorkboardData,
+  loadWorkboardIndex,
+  loadWorkboardThumbnail,
+  migrateLegacyDataIfNeeded,
+  renameWorkboard,
+  saveWorkboardData,
+  saveWorkboardThumbnail,
+  setActiveWorkboardId,
+} from "./workboards/data";
+
+import type { Workboard } from "./workboards/data";
 
 import type { CollabAPI } from "./collab/Collab";
 
@@ -228,7 +253,39 @@ const initializeScene = async (opts: {
   );
   const externalUrlMatch = window.location.hash.match(/^#url=(.*)$/);
 
-  const localDataState = importFromLocalStorage();
+  // resolve the active workboard and load its scene from IndexedDB (migrating
+  // any legacy single-canvas localStorage data into it on first run)
+  const activeBoardId = ensureWorkboardIndexSync();
+  await migrateLegacyDataIfNeeded(activeBoardId);
+  let boardData = await loadWorkboardData(activeBoardId);
+
+  // prefer the synchronous unload/crash recovery snapshot when it is newer than
+  // the last persisted IDB save (IDB writes may not finish during unload)
+  const recovery = LocalData.readRecovery();
+  if (recovery && recovery.boardId === activeBoardId) {
+    let lastSavedStamp = -1;
+    try {
+      lastSavedStamp = JSON.parse(
+        localStorage.getItem(getBoardVersionKey(activeBoardId)) || "-1",
+      );
+    } catch (error: any) {
+      console.error(error);
+    }
+    if (recovery.ts > lastSavedStamp) {
+      boardData = { elements: recovery.elements, appState: recovery.appState };
+      // persist the recovered scene back to IDB so it's durable going forward
+      await saveWorkboardData(activeBoardId, boardData);
+    }
+    LocalData.clearRecovery();
+  }
+
+  const localDataState: {
+    elements: readonly ExcalidrawElement[];
+    appState: Partial<AppState> | null;
+  } = {
+    elements: boardData?.elements ?? [],
+    appState: boardData?.appState ?? null,
+  };
 
   let scene: Omit<
     RestoredDataState,
@@ -395,6 +452,27 @@ const ExcalidrawWrapper = () => {
 
   const debugCanvasRef = useRef<HTMLCanvasElement>(null);
 
+  // workboards (multi-canvas) state
+  // ---------------------------------------------------------------------------
+  // `activeBoardIdRef` is the source of truth read by the (hot-path) onChange
+  // save; the `activeBoardId` state mirror drives the sidebar UI. Initialized
+  // synchronously so the active board id exists before the first save.
+  const activeBoardIdRef = useRef<string | null>(null);
+  if (activeBoardIdRef.current === null) {
+    activeBoardIdRef.current = ensureWorkboardIndexSync();
+  }
+  const [activeBoardId, setActiveBoardId] = useState<string>(
+    activeBoardIdRef.current,
+  );
+  const [workboards, setWorkboards] = useState<Workboard[]>(() =>
+    loadWorkboardIndex(),
+  );
+  const [workboardThumbnails, setWorkboardThumbnails] = useState<
+    Record<string, string>
+  >({});
+  // monotonic token to ignore stale board-loads when switches overlap
+  const boardSwitchSeqRef = useRef(0);
+
   useEffect(() => {
     trackEvent("load", "frame", getFrame());
     // Delayed so that the app has a time to load the latest SW
@@ -509,10 +587,20 @@ const ExcalidrawWrapper = () => {
               });
           }
           // on fresh load, clear unused files from IDB (from previous
-          // session)
-          LocalData.fileStorage.clearObsoleteFiles({
-            currentFileIds: fileIds,
-          });
+          // session). Board-aware: retain files referenced by ANY workboard so
+          // an image shared with another board isn't deleted. Fail CLOSED: if
+          // the cross-board reference union couldn't be fully computed, skip
+          // cleanup rather than risk deleting a still-referenced image.
+          listAllReferencedFileIds().then(
+            ({ fileIds: allBoardFileIds, complete }) => {
+              if (!complete) {
+                return;
+              }
+              LocalData.fileStorage.clearObsoleteFiles({
+                currentFileIds: [...new Set([...fileIds, ...allBoardFileIds])],
+              });
+            },
+          );
         }
       }
     },
@@ -527,6 +615,12 @@ const ExcalidrawWrapper = () => {
     initializeScene({ collabAPI, excalidrawAPI }).then(async (data) => {
       loadImages(data, /* isInitialLoad */ true);
       initialStatePromiseRef.current.promise.resolve(data.scene);
+      // mark the boot board's stamp as seen so the first focus/visibility
+      // syncData doesn't re-import it over edits made before the first save
+      const bootBoardId = activeBoardIdRef.current;
+      if (bootBoardId) {
+        markBrowserStateVersionSeen(getBoardVersionKey(bootBoardId));
+      }
     });
 
     const onHashChange = async (event: HashChangeEvent) => {
@@ -556,7 +650,7 @@ const ExcalidrawWrapper = () => {
       }
     };
 
-    const syncData = debounce(() => {
+    const syncData = debounce(async () => {
       if (isTestEnv()) {
         return;
       }
@@ -564,15 +658,32 @@ const ExcalidrawWrapper = () => {
         !document.hidden &&
         ((collabAPI && !collabAPI.isCollaborating()) || isCollabDisabled)
       ) {
-        // don't sync if local state is newer or identical to browser state
-        if (isBrowserStorageStateNewer(STORAGE_KEYS.VERSION_DATA_STATE)) {
-          const localDataState = importFromLocalStorage();
+        const boardId = activeBoardIdRef.current;
+        // don't sync if local state is newer or identical to browser state.
+        // Data-state stamps are per-board, so another tab editing a *different*
+        // board won't trigger a (clobbering) re-import here.
+        if (
+          boardId &&
+          isBrowserStorageStateNewer(getBoardVersionKey(boardId))
+        ) {
+          const boardData = await loadWorkboardData(boardId);
+          // the user may have switched boards while the IDB read was in flight;
+          // bail so we never apply this board's data onto a different active
+          // board (which onChange would then persist into the wrong board)
+          if (activeBoardIdRef.current !== boardId) {
+            return;
+          }
           const username = importUsernameFromLocalStorage();
           setLangCode(getPreferredLanguage());
-          excalidrawAPI.updateScene({
-            ...localDataState,
-            captureUpdate: CaptureUpdateAction.NEVER,
-          });
+          if (boardData) {
+            excalidrawAPI.updateScene({
+              elements: restoreElements(boardData.elements, null, {
+                repairBindings: true,
+              }),
+              appState: restoreAppState(boardData.appState ?? null, null),
+              captureUpdate: CaptureUpdateAction.NEVER,
+            });
+          }
           LibraryIndexedDBAdapter.load().then((data) => {
             if (data) {
               excalidrawAPI.updateLibrary({
@@ -615,12 +726,27 @@ const ExcalidrawWrapper = () => {
       }
     }, SYNC_BROWSER_TABS_TIMEOUT);
 
+    // synchronously snapshot the active board to localStorage; IDB writes
+    // aren't guaranteed to finish during unload (see LocalData.writeRecovery)
+    const writeActiveRecovery = () => {
+      const boardId = activeBoardIdRef.current;
+      if (boardId && excalidrawAPI && !collabAPI?.isCollaborating()) {
+        LocalData.writeRecovery(
+          boardId,
+          excalidrawAPI.getSceneElementsIncludingDeleted(),
+          excalidrawAPI.getAppState(),
+        );
+      }
+    };
+
     const onUnload = () => {
+      writeActiveRecovery();
       LocalData.flushSave();
     };
 
     const visibilityChange = (event: FocusEvent | Event) => {
       if (event.type === EVENT.BLUR || document.hidden) {
+        writeActiveRecovery();
         LocalData.flushSave();
       }
       if (
@@ -651,6 +777,14 @@ const ExcalidrawWrapper = () => {
 
   useEffect(() => {
     const unloadHandler = (event: BeforeUnloadEvent) => {
+      const boardId = activeBoardIdRef.current;
+      if (boardId && excalidrawAPI && !collabAPI?.isCollaborating()) {
+        LocalData.writeRecovery(
+          boardId,
+          excalidrawAPI.getSceneElementsIncludingDeleted(),
+          excalidrawAPI.getAppState(),
+        );
+      }
       LocalData.flushSave();
 
       if (
@@ -672,7 +806,7 @@ const ExcalidrawWrapper = () => {
     return () => {
       window.removeEventListener(EVENT.BEFORE_UNLOAD, unloadHandler);
     };
-  }, [excalidrawAPI]);
+  }, [excalidrawAPI, collabAPI]);
 
   const onChange = (
     elements: readonly OrderedExcalidrawElement[],
@@ -686,33 +820,41 @@ const ExcalidrawWrapper = () => {
     // this check is redundant, but since this is a hot path, it's best
     // not to evaludate the nested expression every time
     if (!LocalData.isSavePaused()) {
-      LocalData.save(elements, appState, files, () => {
-        if (excalidrawAPI) {
-          let didChange = false;
+      LocalData.save(
+        activeBoardIdRef.current,
+        elements,
+        appState,
+        files,
+        () => {
+          if (excalidrawAPI) {
+            let didChange = false;
 
-          const elements = excalidrawAPI
-            .getSceneElementsIncludingDeleted()
-            .map((element) => {
-              if (
-                LocalData.fileStorage.shouldUpdateImageElementStatus(element)
-              ) {
-                const newElement = newElementWith(element, { status: "saved" });
-                if (newElement !== element) {
-                  didChange = true;
+            const elements = excalidrawAPI
+              .getSceneElementsIncludingDeleted()
+              .map((element) => {
+                if (
+                  LocalData.fileStorage.shouldUpdateImageElementStatus(element)
+                ) {
+                  const newElement = newElementWith(element, {
+                    status: "saved",
+                  });
+                  if (newElement !== element) {
+                    didChange = true;
+                  }
+                  return newElement;
                 }
-                return newElement;
-              }
-              return element;
-            });
+                return element;
+              });
 
-          if (didChange) {
-            excalidrawAPI.updateScene({
-              elements,
-              captureUpdate: CaptureUpdateAction.NEVER,
-            });
+            if (didChange) {
+              excalidrawAPI.updateScene({
+                elements,
+                captureUpdate: CaptureUpdateAction.NEVER,
+              });
+            }
           }
-        }
-      });
+        },
+      );
     }
 
     // Render the debug scene if the debug canvas is available
@@ -725,6 +867,317 @@ const ExcalidrawWrapper = () => {
       );
     }
   };
+
+  // workboards (multi-canvas) handlers
+  // ---------------------------------------------------------------------------
+
+  const refreshWorkboards = useCallback(() => {
+    setWorkboards(loadWorkboardIndex());
+  }, []);
+
+  // keep the board list in sync with create/rename/delete done in other tabs
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key === STORAGE_KEYS.WORKBOARDS_INDEX) {
+        refreshWorkboards();
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [refreshWorkboards]);
+
+  /** Loads a board's referenced image files into the live scene. */
+  const loadBoardImages = useCallback(
+    (elements: readonly ExcalidrawElement[]) => {
+      if (!excalidrawAPI) {
+        return;
+      }
+      const fileIds = elements.reduce((acc, element) => {
+        if (isInitializedImageElement(element)) {
+          acc.push(element.fileId);
+        }
+        return acc;
+      }, [] as FileId[]);
+      if (!fileIds.length) {
+        return;
+      }
+      LocalData.fileStorage
+        .getFiles(fileIds)
+        .then(({ loadedFiles, erroredFiles }) => {
+          if (loadedFiles.length) {
+            excalidrawAPI.addFiles(loadedFiles);
+          }
+          updateStaleImageStatuses({
+            excalidrawAPI,
+            erroredFiles,
+            elements: excalidrawAPI.getSceneElementsIncludingDeleted(),
+          });
+          // reconcile image element status (pending -> saved) for files now in
+          // storage; the debounced-save callback that normally does this is not
+          // run on a board load.
+          let didChange = false;
+          const reconciled = excalidrawAPI
+            .getSceneElementsIncludingDeleted()
+            .map((element) => {
+              if (
+                LocalData.fileStorage.shouldUpdateImageElementStatus(element)
+              ) {
+                const next = newElementWith(element, { status: "saved" });
+                if (next !== element) {
+                  didChange = true;
+                }
+                return next;
+              }
+              return element;
+            });
+          if (didChange) {
+            excalidrawAPI.updateScene({
+              elements: reconciled,
+              captureUpdate: CaptureUpdateAction.NEVER,
+            });
+          }
+        });
+    },
+    [excalidrawAPI],
+  );
+
+  /** Best-effort PNG thumbnail for a board (non-blocking). */
+  const captureWorkboardThumbnail = useCallback(
+    async (
+      boardId: string,
+      elements: readonly ExcalidrawElement[],
+      appState: AppState,
+      files: BinaryFiles,
+    ) => {
+      try {
+        const visibleElements = getNonDeletedElements(elements);
+        if (!visibleElements.length) {
+          return;
+        }
+        const blob = await exportToBlob({
+          elements: visibleElements,
+          appState: { ...appState, exportBackground: true },
+          files: files ?? {},
+          mimeType: "image/png",
+          maxWidthOrHeight: 320,
+        });
+        const dataURL = await getDataURL(blob);
+        await saveWorkboardThumbnail(boardId, dataURL);
+        setWorkboardThumbnails((prev) => ({ ...prev, [boardId]: dataURL }));
+      } catch (error: any) {
+        console.error("workboard thumbnail capture failed", error);
+      }
+    },
+    [],
+  );
+
+  /** Persists the active board immediately (awaited, undebounced) so it can't
+   * race a board switch. */
+  const persistActiveBoard = useCallback(async () => {
+    if (!excalidrawAPI) {
+      return;
+    }
+    const boardId = activeBoardIdRef.current;
+    if (!boardId) {
+      return;
+    }
+    LocalData.cancelSave(boardId);
+    const elements = excalidrawAPI.getSceneElementsIncludingDeleted();
+    const appState = excalidrawAPI.getAppState();
+    const files = excalidrawAPI.getFiles();
+    await LocalData.saveImmediately(boardId, elements, appState, files);
+    captureWorkboardThumbnail(boardId, elements, appState, files);
+  }, [excalidrawAPI, captureWorkboardThumbnail]);
+
+  /** Swaps the live scene to the given board, isolating undo history so undo
+   * can't cross board boundaries. */
+  const loadBoardIntoEditor = useCallback(
+    async (boardId: string) => {
+      if (!excalidrawAPI) {
+        return;
+      }
+      // guard against overlapping switches: only the latest load may apply
+      const seq = ++boardSwitchSeqRef.current;
+      const data = await loadWorkboardData(boardId);
+      if (seq !== boardSwitchSeqRef.current) {
+        return;
+      }
+      setActiveWorkboardId(boardId);
+      activeBoardIdRef.current = boardId;
+      setActiveBoardId(boardId);
+      const currentAppState = excalidrawAPI.getAppState();
+      excalidrawAPI.history.clear();
+      excalidrawAPI.updateScene({
+        elements: restoreElements(data?.elements ?? [], null, {
+          repairBindings: true,
+        }),
+        appState: {
+          ...restoreAppState(data?.appState ?? null, null),
+          // preserve session-global UI that shouldn't reset per board
+          theme: currentAppState.theme,
+          openSidebar: currentAppState.openSidebar,
+        },
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
+      // mark the just-loaded board's stamp as seen so a focus/visibility
+      // syncData doesn't re-import it over unsaved post-load edits
+      markBrowserStateVersionSeen(getBoardVersionKey(boardId));
+      loadBoardImages(data?.elements ?? []);
+    },
+    [excalidrawAPI, loadBoardImages],
+  );
+
+  const guardAgainstCollab = useCallback(() => {
+    if (collabAPI?.isCollaborating()) {
+      excalidrawAPI?.setToast({
+        message: "Stop collaborating to switch workboards.",
+        closable: true,
+      });
+      return true;
+    }
+    return false;
+  }, [collabAPI, excalidrawAPI]);
+
+  const handleSwitchBoard = useCallback(
+    async (targetId: string) => {
+      if (!excalidrawAPI || targetId === activeBoardIdRef.current) {
+        return;
+      }
+      if (guardAgainstCollab()) {
+        return;
+      }
+      await persistActiveBoard();
+      await loadBoardIntoEditor(targetId);
+      refreshWorkboards();
+    },
+    [
+      excalidrawAPI,
+      guardAgainstCollab,
+      persistActiveBoard,
+      loadBoardIntoEditor,
+      refreshWorkboards,
+    ],
+  );
+
+  const handleCreateBoard = useCallback(async () => {
+    if (!excalidrawAPI || guardAgainstCollab()) {
+      return;
+    }
+    await persistActiveBoard();
+    const board = createWorkboard();
+    await loadBoardIntoEditor(board.id);
+    refreshWorkboards();
+  }, [
+    excalidrawAPI,
+    guardAgainstCollab,
+    persistActiveBoard,
+    loadBoardIntoEditor,
+    refreshWorkboards,
+  ]);
+
+  const handleRenameBoard = useCallback(
+    (id: string) => {
+      const board = loadWorkboardIndex().find((b) => b.id === id);
+      const nextName = window.prompt("Rename workboard", board?.name ?? "");
+      if (nextName == null) {
+        return;
+      }
+      const trimmed = nextName.trim();
+      if (!trimmed) {
+        return;
+      }
+      setWorkboards(renameWorkboard(id, trimmed));
+      if (id === activeBoardIdRef.current && excalidrawAPI) {
+        excalidrawAPI.updateScene({
+          appState: { name: trimmed },
+          captureUpdate: CaptureUpdateAction.NEVER,
+        });
+      }
+    },
+    [excalidrawAPI],
+  );
+
+  const handleDuplicateBoard = useCallback(
+    async (id: string) => {
+      if (id === activeBoardIdRef.current) {
+        // make sure the latest edits are persisted before copying
+        await persistActiveBoard();
+      }
+      const copy = await duplicateWorkboard(id);
+      refreshWorkboards();
+      if (copy) {
+        const thumbnail = await loadWorkboardThumbnail(copy.id);
+        if (thumbnail) {
+          setWorkboardThumbnails((prev) => ({ ...prev, [copy.id]: thumbnail }));
+        }
+      }
+    },
+    [persistActiveBoard, refreshWorkboards],
+  );
+
+  const handleDeleteBoard = useCallback(
+    async (id: string) => {
+      // deleting the active board swaps the live scene (loadBoardIntoEditor),
+      // which must not happen mid-collaboration
+      if (id === activeBoardIdRef.current && guardAgainstCollab()) {
+        return;
+      }
+      const boards = loadWorkboardIndex();
+      if (boards.length <= 1) {
+        return;
+      }
+      const board = boards.find((b) => b.id === id);
+      if (
+        !window.confirm(
+          `Delete workboard "${board?.name ?? ""}"? This can't be undone.`,
+        )
+      ) {
+        return;
+      }
+      // cancel any pending debounced save for this board so a late write can't
+      // resurrect an orphan IDB entry after deletion
+      LocalData.cancelSave(id);
+      const remaining = await deleteWorkboard(id);
+      setWorkboards(remaining);
+      setWorkboardThumbnails((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      if (id === activeBoardIdRef.current && remaining.length) {
+        await loadBoardIntoEditor(remaining[0].id);
+      }
+    },
+    [guardAgainstCollab, loadBoardIntoEditor],
+  );
+
+  // load persisted thumbnails for the board list
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        workboards.map(
+          async (board) =>
+            [board.id, await loadWorkboardThumbnail(board.id)] as const,
+        ),
+      );
+      if (cancelled) {
+        return;
+      }
+      setWorkboardThumbnails((prev) => {
+        const next = { ...prev };
+        for (const [id, url] of entries) {
+          if (url) {
+            next[id] = url;
+          }
+        }
+        return next;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workboards]);
 
   const [latestShareableLink, setLatestShareableLink] = useState<string | null>(
     null,
@@ -989,6 +1442,9 @@ const ExcalidrawWrapper = () => {
           isCollabEnabled={!isCollabDisabled}
           theme={appTheme}
           refresh={() => forceRefresh((prev) => !prev)}
+          onWorkboards={() =>
+            excalidrawAPI?.toggleSidebar({ name: WORKBOARDS_SIDEBAR_NAME })
+          }
         />
         <AppWelcomeScreen
           onCollabDialogOpen={onCollabDialogOpen}
@@ -1057,6 +1513,17 @@ const ExcalidrawWrapper = () => {
         />
 
         <AppSidebar />
+        <WorkboardSidebar
+          boards={workboards}
+          activeBoardId={activeBoardId}
+          thumbnails={workboardThumbnails}
+          disabled={isCollaborating}
+          onSwitch={handleSwitchBoard}
+          onCreate={handleCreateBoard}
+          onRename={handleRenameBoard}
+          onDuplicate={handleDuplicateBoard}
+          onDelete={handleDeleteBoard}
+        />
 
         {errorMessage && (
           <ErrorDialog onClose={() => setErrorMessage("")}>

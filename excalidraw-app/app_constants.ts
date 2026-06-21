@@ -37,13 +37,32 @@ export const FIREBASE_STORAGE_PREFIXES = {
 export const ROOM_ID_BYTES = 10;
 
 export const STORAGE_KEYS = {
+  // NOTE: as of multi-board ("workboards") support, per-board scene data lives
+  // in IndexedDB (see `workboards/data.ts`), NOT in these localStorage keys.
+  // These keys are kept only for one-time migration of legacy single-canvas
+  // data into the first workboard.
   LOCAL_STORAGE_ELEMENTS: "excalidraw",
   LOCAL_STORAGE_APP_STATE: "excalidraw-state",
   LOCAL_STORAGE_COLLAB: "excalidraw-collab",
   LOCAL_STORAGE_THEME: "excalidraw-theme",
   LOCAL_STORAGE_DEBUG: "excalidraw-debug",
+  // `VERSION_DATA_STATE` is used as a PREFIX for per-board tab-sync stamps
+  // (`version-dataState:<boardId>`); `VERSION_FILES` stays global because the
+  // binary files store is shared across all boards.
   VERSION_DATA_STATE: "version-dataState",
   VERSION_FILES: "version-files",
+
+  // workboards (multi-canvas) — small metadata in localStorage; scene blobs
+  // live in IndexedDB.
+  WORKBOARDS_INDEX: "excaliboard:index",
+  WORKBOARDS_ACTIVE: "excaliboard:active",
+  // synchronous crash/unload recovery snapshot of the ACTIVE board only. IDB
+  // writes don't reliably complete during unload, so we also mirror the active
+  // board to localStorage synchronously on blur/unload and prefer it on load
+  // when newer than the last persisted IDB save.
+  WORKBOARDS_RECOVERY: "excaliboard:recovery",
+  IDB_WORKBOARDS: "excaliboard-workboards",
+  IDB_WORKBOARD_THUMBNAILS: "excaliboard-thumbnails",
 
   IDB_LIBRARY: "excalidraw-library",
   IDB_TTD_CHATS: "excalidraw-ttd-chats",
