@@ -6,6 +6,7 @@ import {
   TrashIcon,
 } from "@excalidraw/excalidraw/components/icons";
 import clsx from "clsx";
+import { useRef } from "react";
 
 import "./WorkboardSidebar.scss";
 
@@ -43,6 +44,7 @@ export const WorkboardSidebar = ({
   disabled = false,
   onSwitch,
   onCreate,
+  onImport,
   onRename,
   onDuplicate,
   onDelete,
@@ -54,10 +56,13 @@ export const WorkboardSidebar = ({
   disabled?: boolean;
   onSwitch: (id: string) => void;
   onCreate: () => void;
+  onImport: (file: File) => void;
   onRename: (id: string) => void;
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
 }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   return (
     <Sidebar name={WORKBOARDS_SIDEBAR_NAME} docked>
       <Sidebar.Header>
@@ -69,15 +74,40 @@ export const WorkboardSidebar = ({
             Stop collaborating to manage boards.
           </div>
         )}
-        <button
-          type="button"
-          className="workboard-sidebar__new"
-          onClick={onCreate}
-          disabled={disabled}
-        >
-          {PlusIcon}
-          <span>New board</span>
-        </button>
+        <div className="workboard-sidebar__actions-row">
+          <button
+            type="button"
+            className="workboard-sidebar__new"
+            onClick={onCreate}
+            disabled={disabled}
+          >
+            {PlusIcon}
+            <span>New board</span>
+          </button>
+          <button
+            type="button"
+            className="workboard-sidebar__import"
+            title="Import a .excalidraw file as a new board"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled}
+          >
+            Import
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".excalidraw,.json,.png,.svg,application/json,image/png,image/svg+xml"
+            style={{ display: "none" }}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              // reset so selecting the same file again re-triggers onChange
+              event.target.value = "";
+              if (file) {
+                onImport(file);
+              }
+            }}
+          />
+        </div>
         <div className="workboard-sidebar__list">
           {boards.length === 0 && (
             <div className="workboard-sidebar__empty">No boards yet</div>

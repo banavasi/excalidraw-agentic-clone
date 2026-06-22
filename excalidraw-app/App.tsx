@@ -1151,6 +1151,55 @@ const ExcalidrawWrapper = () => {
     [guardAgainstCollab, loadBoardIntoEditor],
   );
 
+  // import a .excalidraw / .png / .svg / .json file as a NEW workboard
+  // (non-destructive — the current board is preserved). This is the bridge
+  // from the /excaliboard skill (and any external file) into the workspace.
+  const handleImportBoard = useCallback(
+    async (file: File) => {
+      if (!excalidrawAPI || guardAgainstCollab()) {
+        return;
+      }
+      let data;
+      try {
+        data = await loadFromBlob(file, null, null);
+      } catch (error: any) {
+        console.error(error);
+        excalidrawAPI.setToast({
+          message: "Couldn't read that file as an Excalidraw scene.",
+          closable: true,
+        });
+        return;
+      }
+      // persist the current board, then create + load the imported one
+      await persistActiveBoard();
+      const name =
+        file.name.replace(/\.(excalidraw|json|png|svg)$/i, "").trim() ||
+        undefined;
+      const board = createWorkboard(name);
+      const elements = data.elements ?? [];
+      await saveWorkboardData(board.id, {
+        elements,
+        appState: data.appState ?? null,
+      });
+      if (data.files && Object.keys(data.files).length) {
+        await LocalData.fileStorage.saveFiles({ elements, files: data.files });
+      }
+      await loadBoardIntoEditor(board.id);
+      refreshWorkboards();
+      excalidrawAPI.setToast({
+        message: `Imported "${board.name}"`,
+        closable: true,
+      });
+    },
+    [
+      excalidrawAPI,
+      guardAgainstCollab,
+      persistActiveBoard,
+      loadBoardIntoEditor,
+      refreshWorkboards,
+    ],
+  );
+
   // load persisted thumbnails for the board list
   useEffect(() => {
     let cancelled = false;
@@ -1520,6 +1569,7 @@ const ExcalidrawWrapper = () => {
           disabled={isCollaborating}
           onSwitch={handleSwitchBoard}
           onCreate={handleCreateBoard}
+          onImport={handleImportBoard}
           onRename={handleRenameBoard}
           onDuplicate={handleDuplicateBoard}
           onDelete={handleDeleteBoard}

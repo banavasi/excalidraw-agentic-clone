@@ -1,4 +1,5 @@
 import { getDefaultAppState } from "@excalidraw/excalidraw/appState";
+import { loadFromBlob } from "@excalidraw/excalidraw/data/blob";
 
 import type { AppState } from "@excalidraw/excalidraw/types";
 import type { ExcalidrawElement } from "@excalidraw/element/types";
@@ -244,6 +245,43 @@ describe("workboards data layer", () => {
 
       LocalData.clearRecovery();
       expect(LocalData.readRecovery()).toBeNull();
+    });
+  });
+
+  describe("import .excalidraw as a new board", () => {
+    it("parses an .excalidraw blob and seeds a new board with its elements", async () => {
+      const scene = {
+        type: "excalidraw",
+        version: 2,
+        source: "test",
+        elements: [
+          {
+            id: "rect-1",
+            type: "rectangle",
+            x: 10,
+            y: 20,
+            width: 100,
+            height: 50,
+          },
+        ],
+        appState: { viewBackgroundColor: "#ffffff" },
+        files: {},
+      };
+      const blob = new Blob([JSON.stringify(scene)], {
+        type: "application/json",
+      });
+      const data = await loadFromBlob(blob as Blob, null, null);
+      expect(data.elements?.length).toBe(1);
+
+      // the import handler then creates a board from the parsed scene
+      const board = createWorkboard("imported");
+      await saveWorkboardData(board.id, {
+        elements: data.elements ?? [],
+        appState: data.appState ?? null,
+      });
+      const round = await loadWorkboardData(board.id);
+      expect(round?.elements).toHaveLength(1);
+      expect((round!.elements[0] as { type: string }).type).toBe("rectangle");
     });
   });
 
