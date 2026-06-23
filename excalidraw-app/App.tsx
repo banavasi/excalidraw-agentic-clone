@@ -103,6 +103,14 @@ import Collab, {
 } from "./collab/Collab";
 import { AppFooter } from "./components/AppFooter";
 import { AppMainMenu } from "./components/AppMainMenu";
+import { SyncSettingsDialog } from "./components/SyncSettingsDialog";
+import {
+  initExcaliboardSync,
+  notifyBoardChanged,
+  pullExcaliboardSync,
+  softDeleteBoardSync,
+  stopExcaliboardSync,
+} from "./data/excaliboardSyncSetup";
 import { AppWelcomeScreen } from "./components/AppWelcomeScreen";
 import {
   ExportToExcalidrawPlus,
@@ -464,6 +472,20 @@ const ExcalidrawWrapper = () => {
   const [activeBoardId, setActiveBoardId] = useState<string>(
     activeBoardIdRef.current,
   );
+  const [syncSettingsOpen, setSyncSettingsOpen] = useState(false);
+
+  // Cloud sync (Phase 2): build + start the engine once the editor API exists,
+  // and tear it down on unmount. A no-op unless sync is configured + enabled.
+  useEffect(() => {
+    if (!excalidrawAPI) {
+      return;
+    }
+    initExcaliboardSync({
+      excalidrawAPI,
+      getActiveBoardId: () => activeBoardIdRef.current,
+    });
+    return () => stopExcaliboardSync();
+  }, [excalidrawAPI]);
   const [workboards, setWorkboards] = useState<Workboard[]>(() =>
     loadWorkboardIndex(),
   );
@@ -654,6 +676,8 @@ const ExcalidrawWrapper = () => {
       if (isTestEnv()) {
         return;
       }
+      // pull cloud changes on focus / visibility (no-op if sync is off)
+      pullExcaliboardSync();
       if (
         !document.hidden &&
         ((collabAPI && !collabAPI.isCollaborating()) || isCollabDisabled)
@@ -855,6 +879,7 @@ const ExcalidrawWrapper = () => {
           }
         },
       );
+      notifyBoardChanged(activeBoardIdRef.current);
     }
 
     // Render the debug scene if the debug canvas is available
@@ -1023,6 +1048,8 @@ const ExcalidrawWrapper = () => {
       // syncData doesn't re-import it over unsaved post-load edits
       markBrowserStateVersionSeen(getBoardVersionKey(boardId));
       loadBoardImages(data?.elements ?? []);
+      // pull any newer server scene for the board we just switched to
+      pullExcaliboardSync();
     },
     [excalidrawAPI, loadBoardImages],
   );
@@ -1138,6 +1165,7 @@ const ExcalidrawWrapper = () => {
       // resurrect an orphan IDB entry after deletion
       LocalData.cancelSave(id);
       const remaining = await deleteWorkboard(id);
+      softDeleteBoardSync(id);
       setWorkboards(remaining);
       setWorkboardThumbnails((prev) => {
         const next = { ...prev };
@@ -1494,7 +1522,19 @@ const ExcalidrawWrapper = () => {
           onWorkboards={() =>
             excalidrawAPI?.toggleSidebar({ name: WORKBOARDS_SIDEBAR_NAME })
           }
+          onSyncSettings={() => setSyncSettingsOpen(true)}
         />
+        {syncSettingsOpen && excalidrawAPI && (
+          <SyncSettingsDialog
+            onClose={() => setSyncSettingsOpen(false)}
+            onSaved={() =>
+              initExcaliboardSync({
+                excalidrawAPI,
+                getActiveBoardId: () => activeBoardIdRef.current,
+              })
+            }
+          />
+        )}
         <AppWelcomeScreen
           onCollabDialogOpen={onCollabDialogOpen}
           isCollabEnabled={!isCollabDisabled}

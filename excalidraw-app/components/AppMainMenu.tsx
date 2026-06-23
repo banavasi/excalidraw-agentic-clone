@@ -23,6 +23,7 @@ export const AppMainMenu: React.FC<{
   theme: Theme | "system";
   refresh: () => void;
   onWorkboards?: () => void;
+  onSyncSettings?: () => void;
 }> = React.memo((props) => {
   return (
     <MainMenu>
@@ -31,6 +32,11 @@ export const AppMainMenu: React.FC<{
           <MainMenu.Item icon={gridIcon} onSelect={props.onWorkboards}>
             Workboards
           </MainMenu.Item>
+          {props.onSyncSettings && (
+            <MainMenu.Item icon={loginIcon} onSelect={props.onSyncSettings}>
+              Cloud sync…
+            </MainMenu.Item>
+          )}
           <MainMenu.Separator />
         </>
       )}
