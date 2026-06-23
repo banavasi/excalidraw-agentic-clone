@@ -38,6 +38,12 @@ interface ImportMetaEnv {
 
   VITE_APP_GIT_SHA: string;
 
+  // Excaliboard self-host (web): default Cloud-sync server URL pre-filled in the
+  // dialog (NOT a secret — bearer + E2E key stay user-entered). Set only in
+  // .env.selfhost. VITE_APP_SELFHOST gates upstream telemetry off in index.html.
+  VITE_APP_EXCALIBOARD_URL: string;
+  VITE_APP_SELFHOST: string;
+
   MODE: string;
 
   DEV: string;

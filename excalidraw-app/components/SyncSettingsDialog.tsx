@@ -18,7 +18,9 @@ export const SyncSettingsDialog: React.FC<{
   onSaved: () => void;
 }> = ({ onClose, onSaved }) => {
   const existing = getSyncConfig();
-  const [serverUrl, setServerUrl] = useState(existing?.serverUrl ?? "");
+  const [serverUrl, setServerUrl] = useState(
+    existing?.serverUrl ?? import.meta.env.VITE_APP_EXCALIBOARD_URL ?? "",
+  );
   const [bearer, setBearer] = useState(existing?.bearer ?? "");
   const [encryptionKey, setEncryptionKey] = useState(
     existing?.encryptionKey ?? "",

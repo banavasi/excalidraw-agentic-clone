@@ -1,0 +1,62 @@
+# Excaliboard editor — static self-host (Phase 3 web), CI + CD to cosmos.
+# Builds the Vite bundle in the GitHub runner and ships ONLY the static output to
+# cosmos (the JS monorepo never lands on the box), then serves it via nginx behind
+# cloudflared + Cloudflare Access. Decoupled from excaliboard-deploy.yml (the sync
+# server) so app changes deploy the app and server changes deploy the server.
+name: excaliboard app deploy
+
+on:
+  push:
+    branches: [add-new-workboard]
+    paths:
+      - "excalidraw-app/**"
+      - "packages/**"
+      - ".env.selfhost"
+      - "server/deploy/nginx/excaliboard-app.conf"
+      - "server/deploy/install-app-vhost.sh"
+      - ".github/workflows/excaliboard-app-deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: excaliboard-app-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    name: build + deploy app (cosmos)
+    runs-on: ubuntu-latest
+    # Share the cosmos deploy lock with the sync-server workflow so two deploys
+    # never race the nginx reload.
+    concurrency:
+      group: deploy-excaliboard-cosmos
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+      - name: install deps
+        run: yarn install --frozen-lockfile
+      - name: build self-host bundle (telemetry stripped, sync URL baked)
+        run: yarn build:selfhost
+      - name: deploy static build + vhost to cosmos over SSH
+        env:
+          COSMOS_SSH_KEY: ${{ secrets.COSMOS_SSH_KEY }}
+          COSMOS_HOST: ${{ secrets.COSMOS_HOST }}
+          COSMOS_USER: ${{ secrets.COSMOS_USER }}
+        run: |
+          install -d -m700 ~/.ssh
+          printf '%s\n' "$COSMOS_SSH_KEY" > ~/.ssh/cosmos_deploy
+          chmod 600 ~/.ssh/cosmos_deploy
+          # Pinned host key (no TOFU) — verify cosmos's identity.
+          cat server/deploy/known_hosts >> ~/.ssh/known_hosts
+          SSH="ssh -i ~/.ssh/cosmos_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+          # Ship ONLY the static build (no monorepo, no node_modules). --delete keeps
+          # the webroot clean across redeploys.
+          rsync -az --delete -e "$SSH" \
+            excalidraw-app/build/ "$COSMOS_USER@$COSMOS_HOST:/var/www/excaliboard-app/"
+          # Ship the nginx vhost, then install + reload on-box.
+          rsync -az -e "$SSH" \
+            server/deploy/nginx/excaliboard-app.conf "$COSMOS_USER@$COSMOS_HOST:/tmp/excaliboard-app.conf"
+          $SSH "$COSMOS_USER@$COSMOS_HOST" 'bash -s' < server/deploy/install-app-vhost.sh
