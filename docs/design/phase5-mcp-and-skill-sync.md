@@ -1,6 +1,17 @@
 # Excaliboard Phase 5 — MCP server + agentic board creation (design spec)
 
-> **Status:** DRAFT — awaiting sign-off. **Date:** 2026-06-23. Depends on Phase 2 (cloud sync, live) + Phase 4 (`/excaliboard` skill).
+> **Status:** DEPLOYED + VERIFIED LIVE (2026-06-23) — **D1–D4 signed off**; the Python tool + the
+> `/excaliboard --sync` path are implemented, deployed to cosmos via the agentic-os CI/CD (PR #1, merged),
+> and verified live through the gateway (doctor `up`; op secrets resolve in-subprocess; `create→list→delete`
+> round-trip; hits the local sync origin `127.0.0.1:8789`). Depends on Phase 2 (cloud sync, live) + Phase 4
+> (`/excaliboard` skill).
+>
+> **Built:** `~/workspaces/personal/agentic-os/tools/excaliboard/` (Python: `crypto.py` byte-compatible
+> with `encryption.ts`, `sync.py` REST client, `ops.py` + element validation, `cli.py`, `agentic.toml`,
+> 21 unit/cross-lang tests + a live e2e). Skill: `Scene.sync()` in `~/.claude/skills/excaliboard/lib/excaliboard.py`.
+> Decisions as built: **D1 Python**, **D2 cosmos**, **D3 CAS-overwrite v1**, **D4 skill-via-tool** — all
+> confirmed. **Live** at `mcp.shashankshandilya.me` as `excaliboard__{list,get,create,update,delete}`.
+> Remaining: the cross-device browser **render** check (open a tool-created board on a 2nd device + reload).
 
 ## 1. Goal & shape
 
