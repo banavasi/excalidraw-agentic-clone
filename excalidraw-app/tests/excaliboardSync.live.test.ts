@@ -61,7 +61,11 @@ live("excaliboard LIVE server integration", () => {
 
   it("file (image) push → pull round-trips through the live server", async () => {
     const dataURL = "data:image/png;base64,SGVsbG8tZnJvbS1saXZl";
-    await backend.putFile(boardId, "live-file", await encryptString(key, dataURL));
+    await backend.putFile(
+      boardId,
+      "live-file",
+      await encryptString(key, dataURL),
+    );
     const got = await backend.getFile(boardId, "live-file");
     expect(got).toBeTruthy();
     const back = await decryptString(
