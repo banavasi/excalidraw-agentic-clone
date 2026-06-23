@@ -30,9 +30,14 @@ const KEY = process.env.EXCALIBOARD_KEY;
 const live = URL && BEARER && KEY ? describe : describe.skip;
 
 live("excaliboard LIVE server integration", () => {
-  const backend = new RestSyncBackend({ serverUrl: URL!, bearer: BEARER! });
+  // Constructed in beforeAll (NOT the describe body) so the suite collects cleanly
+  // when skipped — describe.skip still runs the body, but not the hooks.
+  let backend: RestSyncBackend;
   const key = KEY!;
   const boardId = `live-test-${Date.now()}`;
+  beforeAll(() => {
+    backend = new RestSyncBackend({ serverUrl: URL!, bearer: BEARER! });
+  });
 
   it("scene push → pull round-trips through the live server", async () => {
     const elements = [

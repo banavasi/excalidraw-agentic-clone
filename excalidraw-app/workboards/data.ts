@@ -233,6 +233,37 @@ export const renameWorkboard = (id: string, name: string): Workboard[] => {
   return boards;
 };
 
+/** Name of a board in the index (for cloud sync to push), or null. */
+export const getWorkboardName = (id: string): string | null =>
+  loadWorkboardIndex().find((b) => b.id === id)?.name ?? null;
+
+/**
+ * Register a board by a SPECIFIC id in the index (or rename it if present).
+ * Used by cloud sync to surface boards pulled from another device. Returns
+ * `true` if the index actually changed (so the UI only refreshes when needed).
+ */
+export const upsertWorkboardIndexEntry = (
+  id: string,
+  name: string,
+): boolean => {
+  const boards = loadWorkboardIndex();
+  const idx = boards.findIndex((b) => b.id === id);
+  const now = Date.now();
+  if (idx === -1) {
+    persistWorkboardIndex([
+      ...boards,
+      { id, name: name || "Untitled board", createdAt: now, updatedAt: now },
+    ]);
+    return true;
+  }
+  if (name && boards[idx].name !== name) {
+    boards[idx] = { ...boards[idx], name };
+    persistWorkboardIndex(boards);
+    return true;
+  }
+  return false;
+};
+
 export const deleteWorkboard = async (id: string): Promise<Workboard[]> => {
   const boards = loadWorkboardIndex().filter((b) => b.id !== id);
   persistWorkboardIndex(boards);

@@ -46,7 +46,12 @@ import {
 
 import { getSyncableElements } from "./index";
 
-import type { ServerScene, SyncBackend, SyncStore } from "./excaliboardSync";
+import type {
+  IndexRow,
+  ServerScene,
+  SyncBackend,
+  SyncStore,
+} from "./excaliboardSync";
 
 const MAX_PUSH_RETRIES = 5;
 
@@ -90,6 +95,10 @@ export interface BoardStore {
   ): Promise<void>;
   /** A board was tombstoned on the server — remove it locally. */
   remove(boardId: string): Promise<void>;
+  /** Local name of a board (to push with its scene), or null. */
+  getName(boardId: string): string | null;
+  /** Register/rename a board in the local switcher; true if the index changed. */
+  upsertBoard(boardId: string, name: string): boolean;
 }
 
 export interface SyncEngineDeps {
@@ -100,6 +109,8 @@ export interface SyncEngineDeps {
   getActiveBoardId: () => string | null;
   getKey: () => string;
   now: () => number;
+  /** Called after a pull changes the local board list (refresh the switcher UI). */
+  onBoardsChanged: () => void;
 }
 
 interface MergeResult {
@@ -190,6 +201,7 @@ export class SyncEngine {
         scene_version: sceneVersion,
         iv: ivB64,
         ciphertext: ctB64,
+        ...(await this.nameFields(boardId)),
       });
       if (outcome.ok) {
         await this.deps.store.setLastSynced(boardId, outcome.sceneVersion);
@@ -205,6 +217,45 @@ export class SyncEngine {
         iv: ivB64,
         ciphertext: ctB64,
       });
+    }
+  }
+
+  /**
+   * Push a board's name even when its scene is unchanged (e.g. after a rename).
+   * Re-PUTs the current scene + the new encrypted name with base=lastSynced.
+   */
+  async pushBoardName(boardId: string): Promise<void> {
+    if (this.deps.boards.getName(boardId) == null) {
+      return;
+    }
+    const lastSynced = await this.deps.store.getLastSynced(boardId);
+    if (lastSynced == null) {
+      void this.pushBoard(boardId); // not on the server yet — a scene push carries it
+      return;
+    }
+    const elements = await this.localElements(boardId);
+    if (!elements) {
+      return;
+    }
+    const syncable = getSyncableElements(elements);
+    const { iv, ciphertext } = await encryptElements(
+      this.deps.getKey(),
+      syncable,
+    );
+    try {
+      const outcome = await this.deps.backend.putBoard(boardId, {
+        base_version: lastSynced,
+        scene_version: getSceneVersion(syncable),
+        iv: toBase64(iv),
+        ciphertext: toBase64(ciphertext),
+        ...(await this.nameFields(boardId)),
+      });
+      if (outcome.ok) {
+        await this.deps.store.setLastSynced(boardId, outcome.sceneVersion);
+      }
+      // on conflict/offline the name re-pushes on the next pull or scene edit
+    } catch {
+      // offline — retry later
     }
   }
 
@@ -232,6 +283,7 @@ export class SyncEngine {
           scene_version: merged.version,
           iv: ivB64,
           ciphertext: ctB64,
+          ...(await this.nameFields(boardId)),
         });
         if (outcome.ok) {
           await this.deps.store.setLastSynced(boardId, outcome.sceneVersion);
@@ -385,11 +437,19 @@ export class SyncEngine {
     this.pulling = true;
     try {
       const rows = await this.deps.backend.getIndex(this.indexCursor);
+      let touched = false;
       for (const row of rows) {
         this.indexCursor = Math.max(this.indexCursor ?? 0, row.updatedAt);
         if (row.deleted) {
-          await this.handleRemoteDelete(row.boardId);
+          if (await this.handleRemoteDelete(row.boardId)) {
+            touched = true;
+          }
           continue;
+        }
+        // Surface the board in the local switcher (decrypt + register its name),
+        // so a freshly-authenticated device shows ALL your boards.
+        if (await this.registerBoard(row)) {
+          touched = true;
         }
         const lastSynced = await this.deps.store.getLastSynced(row.boardId);
         if (lastSynced === row.sceneVersion) {
@@ -399,6 +459,9 @@ export class SyncEngine {
         if (scene) {
           await this.applyServerScene(row.boardId, scene);
         }
+      }
+      if (touched) {
+        this.deps.onBoardsChanged();
       }
     } catch (e) {
       // network/offline or transient server error — try again next tick.
@@ -430,16 +493,54 @@ export class SyncEngine {
     }
   }
 
-  private async handleRemoteDelete(boardId: string): Promise<void> {
+  private async handleRemoteDelete(boardId: string): Promise<boolean> {
     if (boardId === this.deps.getActiveBoardId()) {
-      return; // never yank the board the user is currently editing
+      return false; // never yank the board the user is currently editing
     }
     const lastSynced = await this.deps.store.getLastSynced(boardId);
     if (lastSynced == null) {
-      return; // never had it locally
+      return false; // never had it locally
     }
     await this.deps.boards.remove(boardId);
     await this.deps.store.clearLastSynced(boardId);
+    return true;
+  }
+
+  /** Decrypt + register a server board into the local switcher. */
+  private async registerBoard(row: IndexRow): Promise<boolean> {
+    let name = "Untitled board";
+    if (row.nameIv && row.nameCt) {
+      try {
+        name = await decryptString(
+          this.deps.getKey(),
+          fromBase64(row.nameIv),
+          fromBase64(row.nameCt),
+        );
+      } catch {
+        // keep the default name if the encrypted name can't be decrypted
+      }
+    }
+    return this.deps.boards.upsertBoard(row.boardId, name);
+  }
+
+  /** Encrypted name fields to ride along with a scene push (or undefined). */
+  private async nameFields(
+    boardId: string,
+  ): Promise<{ name_iv: string; name_ct: string } | undefined> {
+    const name = this.deps.boards.getName(boardId);
+    if (name == null) {
+      return undefined;
+    }
+    const enc = await encryptString(this.deps.getKey(), name);
+    return { name_iv: enc.iv, name_ct: enc.ciphertext };
+  }
+
+  /** Download missing image files for the active board (e.g. after a switch). */
+  async downloadActiveBoardFiles(): Promise<void> {
+    const active = this.deps.getActiveBoardId();
+    if (active) {
+      await this.syncFilesDown(active);
+    }
   }
 
   // -- delete propagation ---------------------------------------------------

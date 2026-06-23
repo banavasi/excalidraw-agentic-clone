@@ -14,8 +14,10 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 import {
   deleteWorkboard,
+  getWorkboardName,
   loadWorkboardData,
   saveWorkboardData,
+  upsertWorkboardIndexEntry,
 } from "../workboards/data";
 
 import {
@@ -55,12 +57,15 @@ const createBoardStore = (): BoardStore => ({
   remove: async (boardId) => {
     await deleteWorkboard(boardId);
   },
+  getName: (boardId) => getWorkboardName(boardId),
+  upsertBoard: (boardId, name) => upsertWorkboardIndexEntry(boardId, name),
 });
 
 /** (Re)build and start the engine from the saved config. Idempotent. */
 export const initExcaliboardSync = (opts: {
   excalidrawAPI: ExcalidrawImperativeAPI;
   getActiveBoardId: () => string | null;
+  onBoardsChanged: () => void;
 }): void => {
   stopExcaliboardSync();
   const config = getSyncConfig();
@@ -75,6 +80,7 @@ export const initExcaliboardSync = (opts: {
     getActiveBoardId: opts.getActiveBoardId,
     getKey: () => config.encryptionKey,
     now: () => Date.now(),
+    onBoardsChanged: opts.onBoardsChanged,
   });
   engine.start();
 };
@@ -101,4 +107,14 @@ export const pullExcaliboardSync = (): void => {
 /** Propagate a local board deletion to the server (soft-delete tombstone). */
 export const softDeleteBoardSync = (boardId: string): void => {
   void engine?.softDelete(boardId);
+};
+
+/** Download missing image files for the active board (after a board switch). */
+export const downloadActiveBoardFiles = (): void => {
+  void engine?.downloadActiveBoardFiles();
+};
+
+/** Propagate a board rename to the server (pushes the encrypted name). */
+export const syncBoardName = (boardId: string): void => {
+  void engine?.pushBoardName(boardId);
 };

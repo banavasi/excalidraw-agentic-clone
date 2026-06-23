@@ -113,6 +113,7 @@ class FakeBridge implements EditorBridge {
 
 class FakeBoardStore implements BoardStore {
   data = new Map<string, readonly OrderedExcalidrawElement[]>();
+  names = new Map<string, string>();
   removed: string[] = [];
   async load(boardId: string) {
     return this.data.get(boardId) ?? null;
@@ -123,6 +124,15 @@ class FakeBoardStore implements BoardStore {
   async remove(boardId: string) {
     this.removed.push(boardId);
     this.data.delete(boardId);
+    this.names.delete(boardId);
+  }
+  getName(boardId: string): string | null {
+    return this.names.get(boardId) ?? null;
+  }
+  upsertBoard(boardId: string, name: string): boolean {
+    const changed = this.names.get(boardId) !== name;
+    this.names.set(boardId, name);
+    return changed;
   }
 }
 
@@ -159,6 +169,7 @@ const makeEngine = (
     getActiveBoardId: () => overrides.activeBoardId ?? "board-1",
     getKey: key ?? (() => ""),
     now: () => 1000,
+    onBoardsChanged: overrides.onBoardsChanged ?? (() => {}),
   };
   return { engine: new SyncEngine(deps), backend, store, bridge, boards };
 };
@@ -425,5 +436,101 @@ describe("SyncEngine image/file sync", () => {
     expect(bridge.getFile("file-2" as FileId)?.dataURL).toBe(
       "data:image/png;base64,BBBB",
     );
+  });
+});
+
+describe("SyncEngine board-list (name) sync", () => {
+  let key: string;
+  beforeEach(async () => {
+    key = await generateSyncKey();
+  });
+
+  it("pushes the encrypted board name alongside the scene", async () => {
+    const backend = new MockBackend();
+    const boards = new FakeBoardStore();
+    boards.names.set("board-1", "My Diagram");
+    const bridge = new FakeBridge([rect("a")]);
+    const { engine } = makeEngine({
+      backend,
+      bridge,
+      boards,
+      getKey: () => key,
+    });
+
+    await engine.pushBoard("board-1");
+
+    const body = backend.putCalls[0].body;
+    expect(body.name_iv).toBeTruthy();
+    expect(body.name_ct).toBeTruthy();
+    const name = await decryptString(
+      key,
+      fromBase64(body.name_iv!),
+      fromBase64(body.name_ct!),
+    );
+    expect(name).toBe("My Diagram");
+  });
+
+  it("registers server boards into the local switcher on pull (decrypted name)", async () => {
+    const backend = new MockBackend();
+    const remote = [rect("r1")];
+    const R = getSceneVersion(remote);
+    const enc = await encryptElements(key, remote);
+    backend.scenes.set("b-server", {
+      sceneVersion: R,
+      iv: toBase64(enc.iv),
+      ciphertext: toBase64(enc.ciphertext),
+    });
+    const nameEnc = await encryptString(key, "Server Board");
+    backend.indexRows = [
+      {
+        boardId: "b-server",
+        nameIv: nameEnc.iv,
+        nameCt: nameEnc.ciphertext,
+        sceneVersion: R,
+        deleted: false,
+        updatedAt: 5,
+      },
+    ];
+    const boards = new FakeBoardStore();
+    let refreshed = 0;
+    const { engine } = makeEngine({
+      backend,
+      boards,
+      getKey: () => key,
+      activeBoardId: "other",
+      onBoardsChanged: () => {
+        refreshed++;
+      },
+    });
+
+    await engine.pull();
+
+    expect(boards.names.get("b-server")).toBe("Server Board");
+    expect(refreshed).toBeGreaterThanOrEqual(1);
+  });
+
+  it("propagates a rename via pushBoardName even when the scene is unchanged", async () => {
+    const backend = new MockBackend();
+    const boards = new FakeBoardStore();
+    const bridge = new FakeBridge([rect("a")]);
+    boards.names.set("board-1", "Old Name");
+    const { engine } = makeEngine({
+      backend,
+      bridge,
+      boards,
+      getKey: () => key,
+    });
+
+    await engine.pushBoard("board-1"); // establish on the server
+    boards.names.set("board-1", "New Name");
+    await engine.pushBoardName("board-1");
+
+    const last = backend.putCalls[backend.putCalls.length - 1].body;
+    const name = await decryptString(
+      key,
+      fromBase64(last.name_iv!),
+      fromBase64(last.name_ct!),
+    );
+    expect(name).toBe("New Name");
   });
 });

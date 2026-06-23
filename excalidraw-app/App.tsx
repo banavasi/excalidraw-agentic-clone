@@ -105,11 +105,13 @@ import { AppFooter } from "./components/AppFooter";
 import { AppMainMenu } from "./components/AppMainMenu";
 import { SyncSettingsDialog } from "./components/SyncSettingsDialog";
 import {
+  downloadActiveBoardFiles,
   initExcaliboardSync,
   notifyBoardChanged,
   pullExcaliboardSync,
   softDeleteBoardSync,
   stopExcaliboardSync,
+  syncBoardName,
 } from "./data/excaliboardSyncSetup";
 import { AppWelcomeScreen } from "./components/AppWelcomeScreen";
 import {
@@ -473,19 +475,6 @@ const ExcalidrawWrapper = () => {
     activeBoardIdRef.current,
   );
   const [syncSettingsOpen, setSyncSettingsOpen] = useState(false);
-
-  // Cloud sync (Phase 2): build + start the engine once the editor API exists,
-  // and tear it down on unmount. A no-op unless sync is configured + enabled.
-  useEffect(() => {
-    if (!excalidrawAPI) {
-      return;
-    }
-    initExcaliboardSync({
-      excalidrawAPI,
-      getActiveBoardId: () => activeBoardIdRef.current,
-    });
-    return () => stopExcaliboardSync();
-  }, [excalidrawAPI]);
   const [workboards, setWorkboards] = useState<Workboard[]>(() =>
     loadWorkboardIndex(),
   );
@@ -911,6 +900,21 @@ const ExcalidrawWrapper = () => {
     return () => window.removeEventListener("storage", onStorage);
   }, [refreshWorkboards]);
 
+  // Cloud sync (Phase 2): build + start the engine once the editor API exists,
+  // and tear it down on unmount. A no-op unless sync is configured + enabled.
+  // onBoardsChanged refreshes the switcher when a pull adds/renames/removes boards.
+  useEffect(() => {
+    if (!excalidrawAPI) {
+      return;
+    }
+    initExcaliboardSync({
+      excalidrawAPI,
+      getActiveBoardId: () => activeBoardIdRef.current,
+      onBoardsChanged: refreshWorkboards,
+    });
+    return () => stopExcaliboardSync();
+  }, [excalidrawAPI, refreshWorkboards]);
+
   /** Loads a board's referenced image files into the live scene. */
   const loadBoardImages = useCallback(
     (elements: readonly ExcalidrawElement[]) => {
@@ -1048,8 +1052,10 @@ const ExcalidrawWrapper = () => {
       // syncData doesn't re-import it over unsaved post-load edits
       markBrowserStateVersionSeen(getBoardVersionKey(boardId));
       loadBoardImages(data?.elements ?? []);
-      // pull any newer server scene for the board we just switched to
+      // pull any newer server scene for the board we just switched to, and fetch
+      // its images (which only sync for the active board)
       pullExcaliboardSync();
+      downloadActiveBoardFiles();
     },
     [excalidrawAPI, loadBoardImages],
   );
@@ -1114,6 +1120,7 @@ const ExcalidrawWrapper = () => {
         return;
       }
       setWorkboards(renameWorkboard(id, trimmed));
+      syncBoardName(id);
       if (id === activeBoardIdRef.current && excalidrawAPI) {
         excalidrawAPI.updateScene({
           appState: { name: trimmed },
@@ -1531,6 +1538,7 @@ const ExcalidrawWrapper = () => {
               initExcaliboardSync({
                 excalidrawAPI,
                 getActiveBoardId: () => activeBoardIdRef.current,
+                onBoardsChanged: refreshWorkboards,
               })
             }
           />
