@@ -1,0 +1,9 @@
+# Pinned SSH host keys for cosmos-pub (the CI deploy target). Hashed (`ssh-keyscan -H`)
+# so the IP is not in plaintext; host keys are public, so this is safe to commit.
+# The CI deploy job appends this to ~/.ssh/known_hosts and connects with
+# StrictHostKeyChecking=yes — verifying cosmos's identity instead of trusting on first use.
+# Refresh if cosmos is reinstalled / its host keys rotate:
+#   ssh-keyscan -H -t ed25519,ecdsa,rsa <cosmos-pub-ip> > server/deploy/known_hosts   (re-add this header)
+|1|VOIjv7cd3ROm9hm1Z9zP7JgNmgQ=|kDw+m/529g5REi6pmu1zISjwHwk= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDP+dfPi2jnXnhZb6fhw6Zd1LWHOQsHrK8dmd3orjs6N
+|1|Ux7hMgS6X2QYAMJprmqiU1bPyeg=|pyTvSSXXgoVVHG5hnV/huD9dZdQ= ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCQBoT86J2Dqd6MIiyqe8IyX4nf1uxlx1shqPMSbVH3r4Cmv6tkWtkV8ZTNlQLTLpJaVnea4Ta1aDgxh4hE0M59jKg30eKmxJ/xjv7leB7cySa8v3VB1eJIavfXVwWKGNU9li6sLXUokkPVlv1vnzV9TMbRP0ElsE2vJV2BsXShPINk1HuGJg4RxEvUx3NvKWG89T27GJ53HLY2m19Uo2pRvsg1DYReCfzNzAoMgOm/LMFWQvWWFt/QFS7gUTW0VCFCD2apwywzNMVAPWG9LJps2LFf5B1WOMgZmZSvnJmSa9I6qbiCbdO0jwdySpK7ZFcB7++Hkm4Y776HDHN+jDubpebQzTvJadZ/8uLyg+vSPzZeLb8fba4sua79IKxeLgXHKMpA7HviyIZ/ZKAzeDPI5UvSDgnQ31rV2avUmATX2nPmlC30cf6giD+FkNS5DUxs4jJUa7Taxzvdl68GLe7qKCeG9icyUT6TNQGQYe81ZIMjyMI1OzTAFkGGBNrgdL8=
+|1|NEFybPGrdFQGpF+PUbl2pZSOKF8=|XBsEoqO+N5EwCPIEphlzf3xwCRw= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBCkFF34Vf5pZIv3+BgA3jzVEIBQhyRJ/Br0a/gNo7gWXwbCSpsLgSRWW9t5EAkhdZEdBbjw2PFIZgSuveEgDYI4=

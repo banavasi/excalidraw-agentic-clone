@@ -1,0 +1,62 @@
+# Excaliboard sync server — CI + CD to cosmos.
+# Scoped to server/** so it never collides with upstream excalidraw's web-app workflows.
+# Mirrors the agentic-os pattern: build/test gate, then SSH to cosmos-pub and run an
+# idempotent on-box deploy (rsync the server subtree -> docker compose up -> health gate).
+name: excaliboard deploy
+
+on:
+  push:
+    branches: [add-new-workboard]
+    paths:
+      - "server/**"
+      - ".github/workflows/excaliboard-deploy.yml"
+  workflow_dispatch:
+
+# Never interrupt an in-flight cosmos deploy.
+concurrency:
+  group: excaliboard-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: server (pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: pytest (gate — in-memory store; PG integration auto-skips)
+        run: uv run --extra test pytest -q
+
+  deploy:
+    name: deploy (cosmos)
+    needs: [test]
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-excaliboard-cosmos
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: deploy to cosmos over SSH
+        env:
+          COSMOS_SSH_KEY: ${{ secrets.COSMOS_SSH_KEY }}
+          COSMOS_HOST: ${{ secrets.COSMOS_HOST }}
+          COSMOS_USER: ${{ secrets.COSMOS_USER }}
+        run: |
+          install -d -m700 ~/.ssh
+          printf '%s\n' "$COSMOS_SSH_KEY" > ~/.ssh/cosmos_deploy
+          chmod 600 ~/.ssh/cosmos_deploy
+          # Pinned host key (no TOFU) — verify cosmos's identity.
+          cat server/deploy/known_hosts >> ~/.ssh/known_hosts
+          SSH="ssh -i ~/.ssh/cosmos_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+          # Ship ONLY the server subtree (the JS monorepo never lands on cosmos).
+          # --delete keeps the box in sync; .env + Postgres data + venv are preserved.
+          rsync -az --delete \
+            --exclude '.env' --exclude 'data/' --exclude 'backups' \
+            --exclude '.venv/' --exclude '__pycache__/' --exclude '*.pyc' \
+            -e "$SSH" server/ "$COSMOS_USER@$COSMOS_HOST:/opt/excaliboard/"
+          # Run the idempotent on-box deploy (build -> up -> health gate -> rollback).
+          $SSH "$COSMOS_USER@$COSMOS_HOST" 'bash -s' < server/deploy/deploy-cosmos.sh
