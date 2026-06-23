@@ -1,13 +1,22 @@
 import { API } from "@excalidraw/excalidraw/tests/helpers/api";
 import { getSceneVersion } from "@excalidraw/element";
 
-import type { OrderedExcalidrawElement } from "@excalidraw/element/types";
-import type { AppState } from "@excalidraw/excalidraw/types";
+import type {
+  FileId,
+  OrderedExcalidrawElement,
+} from "@excalidraw/element/types";
+import type {
+  AppState,
+  BinaryFileData,
+  DataURL,
+} from "@excalidraw/excalidraw/types";
 
 import {
   MemorySyncStore,
   decryptElements,
+  decryptString,
   encryptElements,
+  encryptString,
   fromBase64,
   generateSyncKey,
   toBase64,
@@ -78,6 +87,8 @@ class MockBackend implements SyncBackend {
 
 class FakeBridge implements EditorBridge {
   applied: OrderedExcalidrawElement[] | null = null;
+  files = new Map<FileId, BinaryFileData>();
+  added: BinaryFileData[] = [];
   constructor(public elements: readonly OrderedExcalidrawElement[]) {}
   getElements(): readonly OrderedExcalidrawElement[] {
     return this.elements;
@@ -88,6 +99,15 @@ class FakeBridge implements EditorBridge {
   applyRemote(elements: readonly OrderedExcalidrawElement[]): void {
     this.applied = [...elements];
     this.elements = [...elements];
+  }
+  getFile(fileId: FileId): BinaryFileData | undefined {
+    return this.files.get(fileId);
+  }
+  addFiles(files: BinaryFileData[]): void {
+    this.added.push(...files);
+    for (const f of files) {
+      this.files.set(f.id, f);
+    }
   }
 }
 
@@ -108,6 +128,20 @@ class FakeBoardStore implements BoardStore {
 
 const rect = (id: string): OrderedExcalidrawElement =>
   API.createElement({ type: "rectangle", id }) as OrderedExcalidrawElement;
+
+const imageEl = (id: string, fileId: string): OrderedExcalidrawElement =>
+  ({
+    ...API.createElement({ type: "image", id, width: 100, height: 100 }),
+    fileId: fileId as FileId,
+    status: "saved",
+  } as unknown as OrderedExcalidrawElement);
+
+const fileData = (id: string, dataURL: string): BinaryFileData => ({
+  id: id as FileId,
+  dataURL: dataURL as DataURL,
+  mimeType: "image/png",
+  created: 1,
+});
 
 const makeEngine = (
   overrides: Partial<SyncEngineDeps> & { activeBoardId?: string | null },
@@ -306,5 +340,90 @@ describe("SyncEngine.pull", () => {
 
     expect(boards.removed).toContain("gone");
     expect(await store.getLastSynced("gone")).toBeNull();
+  });
+});
+
+describe("SyncEngine image/file sync", () => {
+  let key: string;
+  beforeEach(async () => {
+    key = await generateSyncKey();
+  });
+
+  it("pushes referenced image files the server lacks (encrypted)", async () => {
+    const backend = new MockBackend();
+    const bridge = new FakeBridge([imageEl("img", "file-1")]);
+    bridge.files.set(
+      "file-1" as FileId,
+      fileData("file-1", "data:image/png;base64,AAAA"),
+    );
+    const { engine } = makeEngine({ backend, bridge, getKey: () => key });
+
+    await engine.pushBoard("board-1");
+
+    const stored = backend.files.get("board-1/file-1");
+    expect(stored).toBeTruthy();
+    // round-trips: the stored blob decrypts back to the original dataURL
+    const dataURL = await decryptString(
+      key,
+      fromBase64(stored!.iv),
+      fromBase64(stored!.ciphertext),
+    );
+    expect(dataURL).toBe("data:image/png;base64,AAAA");
+  });
+
+  it("skips a file the server already has", async () => {
+    const backend = new MockBackend();
+    backend.files.set("board-1/file-1", await encryptString(key, "x"));
+    const putSpy: string[] = [];
+    const origPut = backend.putFile.bind(backend);
+    backend.putFile = async (b, f, body) => {
+      putSpy.push(f);
+      return origPut(b, f, body);
+    };
+    const bridge = new FakeBridge([imageEl("img", "file-1")]);
+    bridge.files.set(
+      "file-1" as FileId,
+      fileData("file-1", "data:image/png;base64,AAAA"),
+    );
+    const { engine } = makeEngine({ backend, bridge, getKey: () => key });
+
+    await engine.pushBoard("board-1");
+    expect(putSpy).not.toContain("file-1"); // already on the server -> not re-pushed
+  });
+
+  it("downloads missing image files into the editor on pull", async () => {
+    const backend = new MockBackend();
+    const remote = [imageEl("img", "file-2")];
+    const R = getSceneVersion(remote);
+    const enc = await encryptElements(key, remote);
+    backend.scenes.set("board-1", {
+      sceneVersion: R,
+      iv: toBase64(enc.iv),
+      ciphertext: toBase64(enc.ciphertext),
+    });
+    backend.indexRows = [
+      {
+        boardId: "board-1",
+        nameIv: null,
+        nameCt: null,
+        sceneVersion: R,
+        deleted: false,
+        updatedAt: 5,
+      },
+    ];
+    backend.files.set(
+      "board-1/file-2",
+      await encryptString(key, "data:image/png;base64,BBBB"),
+    );
+
+    const bridge = new FakeBridge([]); // editor empty, no file yet
+    const { engine } = makeEngine({ backend, bridge, getKey: () => key });
+
+    await engine.pull();
+
+    expect(bridge.added.map((f) => f.id)).toContain("file-2");
+    expect(bridge.getFile("file-2" as FileId)?.dataURL).toBe(
+      "data:image/png;base64,BBBB",
+    );
   });
 });

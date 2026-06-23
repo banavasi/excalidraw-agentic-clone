@@ -35,6 +35,8 @@ const createEditorBridge = (api: ExcalidrawImperativeAPI): EditorBridge => ({
   getAppState: () => api.getAppState(),
   applyRemote: (elements) =>
     api.updateScene({ elements, captureUpdate: CaptureUpdateAction.NEVER }),
+  getFile: (fileId) => api.getFiles()[fileId],
+  addFiles: (files) => api.addFiles(files),
 });
 
 const createBoardStore = (): BoardStore => ({

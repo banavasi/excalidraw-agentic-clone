@@ -150,6 +150,27 @@ export const encryptBytes = async (
   return { iv: toBase64(iv), ciphertext: toBase64(encryptedBuffer) };
 };
 
+/** Encrypt a string (e.g. an image's dataURL) → base64 {iv, ciphertext}. */
+export const encryptString = async (
+  key: string,
+  text: string,
+): Promise<{ iv: string; ciphertext: string }> => {
+  const { encryptedBuffer, iv } = await encryptData(
+    key,
+    new TextEncoder().encode(text),
+  );
+  return { iv: toBase64(iv), ciphertext: toBase64(encryptedBuffer) };
+};
+
+export const decryptString = async (
+  key: string,
+  iv: Uint8Array<ArrayBuffer>,
+  ciphertext: Uint8Array<ArrayBuffer>,
+): Promise<string> => {
+  const decrypted = await decryptData(iv, ciphertext, key);
+  return new TextDecoder("utf-8").decode(new Uint8Array(decrypted));
+};
+
 // ---------------------------------------------------------------------------
 // REST backend
 // ---------------------------------------------------------------------------

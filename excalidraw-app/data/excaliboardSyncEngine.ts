@@ -16,17 +16,29 @@ import {
   bumpElementVersions,
   restoreElements,
 } from "@excalidraw/excalidraw/data/restore";
-import { getSceneVersion } from "@excalidraw/element";
+import {
+  getSceneVersion,
+  isInitializedImageElement,
+} from "@excalidraw/element";
 
 import type { RemoteExcalidrawElement } from "@excalidraw/excalidraw/data/reconcile";
-import type { OrderedExcalidrawElement } from "@excalidraw/element/types";
-import type { AppState } from "@excalidraw/excalidraw/types";
+import type {
+  FileId,
+  OrderedExcalidrawElement,
+} from "@excalidraw/element/types";
+import type {
+  AppState,
+  BinaryFileData,
+  DataURL,
+} from "@excalidraw/excalidraw/types";
 
 import { SYNC_FULL_SCENE_INTERVAL_MS } from "../app_constants";
 
 import {
   decryptElements,
+  decryptString,
   encryptElements,
+  encryptString,
   fromBase64,
   SyncHttpError,
   toBase64,
@@ -45,7 +57,29 @@ export interface EditorBridge {
   getAppState(): AppState;
   /** Apply a reconciled remote scene WITHOUT creating an undo entry (captureUpdate NEVER). */
   applyRemote(elements: readonly OrderedExcalidrawElement[]): void;
+  /** The active board's loaded binary file, if the editor has it. */
+  getFile(fileId: FileId): BinaryFileData | undefined;
+  /** Add downloaded binary files to the editor (active board). */
+  addFiles(files: BinaryFileData[]): void;
 }
+
+/** Image fileIds referenced by the scene (deduped). */
+const referencedFileIds = (
+  elements: readonly OrderedExcalidrawElement[],
+): FileId[] => {
+  const ids = new Set<FileId>();
+  for (const element of elements) {
+    if (isInitializedImageElement(element)) {
+      ids.add(element.fileId);
+    }
+  }
+  return [...ids];
+};
+
+const mimeFromDataURL = (dataURL: string): string => {
+  const match = dataURL.match(/^data:([^;,]+)/);
+  return match ? match[1] : "image/png";
+};
 
 /** Bridges Phase-1 per-board persistence for NON-active (background) boards. */
 export interface BoardStore {
@@ -159,6 +193,7 @@ export class SyncEngine {
       });
       if (outcome.ok) {
         await this.deps.store.setLastSynced(boardId, outcome.sceneVersion);
+        await this.syncFilesUp(boardId);
       } else {
         await this.reconcileAndRetry(boardId, syncable, outcome.conflict);
       }
@@ -200,6 +235,7 @@ export class SyncEngine {
         });
         if (outcome.ok) {
           await this.deps.store.setLastSynced(boardId, outcome.sceneVersion);
+          await this.syncFilesUp(boardId);
           return;
         }
         local = merged.syncable;
@@ -276,6 +312,70 @@ export class SyncEngine {
     return { syncable, version: getSceneVersion(syncable) };
   }
 
+  // -- image/file sync (active board only) ----------------------------------
+
+  /** Push referenced image files the server doesn't have yet. Best-effort. */
+  private async syncFilesUp(boardId: string): Promise<void> {
+    if (boardId !== this.deps.getActiveBoardId()) {
+      return; // only the active board's files are loaded in the editor
+    }
+    try {
+      const key = this.deps.getKey();
+      for (const fileId of referencedFileIds(this.deps.bridge.getElements())) {
+        const file = this.deps.bridge.getFile(fileId);
+        if (!file?.dataURL) {
+          continue;
+        }
+        if (await this.deps.backend.getFile(boardId, fileId)) {
+          continue; // content-addressed file already on the server
+        }
+        await this.deps.backend.putFile(
+          boardId,
+          fileId,
+          await encryptString(key, file.dataURL),
+        );
+      }
+    } catch {
+      // best-effort; files retry on the next push/pull
+    }
+  }
+
+  /** Download referenced image files the editor is missing. Best-effort. */
+  private async syncFilesDown(boardId: string): Promise<void> {
+    if (boardId !== this.deps.getActiveBoardId()) {
+      return;
+    }
+    try {
+      const key = this.deps.getKey();
+      const loaded: BinaryFileData[] = [];
+      for (const fileId of referencedFileIds(this.deps.bridge.getElements())) {
+        if (this.deps.bridge.getFile(fileId)) {
+          continue; // editor already has it
+        }
+        const blob = await this.deps.backend.getFile(boardId, fileId);
+        if (!blob) {
+          continue;
+        }
+        const dataURL = await decryptString(
+          key,
+          fromBase64(blob.iv),
+          fromBase64(blob.ciphertext),
+        );
+        loaded.push({
+          id: fileId,
+          dataURL: dataURL as DataURL,
+          mimeType: mimeFromDataURL(dataURL) as BinaryFileData["mimeType"],
+          created: this.deps.now(),
+        });
+      }
+      if (loaded.length) {
+        this.deps.bridge.addFiles(loaded);
+      }
+    } catch {
+      // best-effort
+    }
+  }
+
   // -- pull (focus / visibility / interval) ---------------------------------
 
   async pull(): Promise<void> {
@@ -321,6 +421,7 @@ export class SyncEngine {
     // We've incorporated the server's scene — record it as our base BEFORE any
     // push, so the upload below uses base=scene.sceneVersion (not a stale 0).
     await this.deps.store.setLastSynced(boardId, scene.sceneVersion);
+    await this.syncFilesDown(boardId);
     if (merged.version !== scene.sceneVersion) {
       // `restore` re-versions elements during repair, and/or local had unpushed
       // edits folded into the merge — upload the merged scene so the server agrees.
