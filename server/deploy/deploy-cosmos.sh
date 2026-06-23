@@ -60,4 +60,4 @@ sudo nginx -t && sudo systemctl reload nginx
 log "nginx vhost installed + reloaded"
 
 docker image prune -f >/dev/null 2>&1 || true
-log "DEPLOY OK — excaliboard live on :8789 (sync.shashankshandilya.me)"
+log "DEPLOY OK — excaliboard live on :8789 (excaliboard.shashankshandilya.me)"

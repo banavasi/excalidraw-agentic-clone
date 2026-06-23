@@ -41,6 +41,6 @@ echo "registered backup cron 03:15 UTC"
 
 echo
 echo "DONE. Remaining one-time steps (off-box):"
-echo "  1. DNS:    cloudflared tunnel route dns cosmos sync.shashankshandilya.me"
+echo "  1. DNS:    cloudflared tunnel route dns cosmos excaliboard.shashankshandilya.me"
 echo "  2. Backup: add the newest excaliboard dump to ~/bin/offsite_sync.sh"
 echo "  3. Deploy: push to add-new-workboard (server/**) or run the 'excaliboard deploy' workflow."

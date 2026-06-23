@@ -49,15 +49,15 @@ via rsync.)
 
 **4. DNS** (one line — the wildcard tunnel already points the zone at nginx):
 ```bash
-ssh ubuntu@cosmos-pub 'cloudflared tunnel route dns cosmos sync.shashankshandilya.me'
+ssh ubuntu@cosmos-pub 'cloudflared tunnel route dns cosmos excaliboard.shashankshandilya.me'
 ```
 
 **5. Deploy:** push a change under `server/**` to `add-new-workboard`, or run the **excaliboard
 deploy** workflow manually (`gh workflow run "excaliboard deploy"`). Verify:
-`curl https://sync.shashankshandilya.me/sync/healthz`.
+`curl https://excaliboard.shashankshandilya.me/sync/healthz`.
 
 ## Client setup
-In the app: **menu → Cloud sync…** → server `https://sync.shashankshandilya.me`, the
+In the app: **menu → Cloud sync…** → server `https://excaliboard.shashankshandilya.me`, the
 `static_bearer` token, and the **same E2E key on every device**, then enable.
 
 ## Notes
