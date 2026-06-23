@@ -6,8 +6,10 @@ Env var names match the spec / docker-compose verbatim (case-insensitive):
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # Single-user v1: the static bearer authenticates the one account. Modeled so a
 # real multi-account ``external_sub`` is a non-breaking add later (see app_user).
@@ -50,7 +52,9 @@ class Settings(BaseSettings):
     service_name: str = "excaliboard-sync"
 
     # Browser client is cross-origin; tighten to real hosts at deploy.
-    cors_origins: list[str] = ["*"]
+    # NoDecode: take the env var as a raw comma-separated string (don't JSON-decode
+    # it), so values like "*" or "https://a,https://b" parse via the validator below.
+    cors_origins: Annotated[list[str], NoDecode] = ["*"]
 
     @field_validator("cors_origins", mode="before")
     @classmethod
