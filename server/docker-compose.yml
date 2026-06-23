@@ -1,0 +1,56 @@
+# Excaliboard sync service — cosmos-service-pattern.
+# Pinned images, localhost+tailnet binds only (never 0.0.0.0), own Postgres,
+# .env (0600) seeded from 1Password Mithra. Deploys to /opt/excaliboard.
+name: excaliboard
+
+services:
+  api:
+    build: .
+    image: excaliboard-api:0.1.0
+    container_name: excaliboard-api
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      # Internal docker network: reach Postgres by service name on 5432.
+      DATABASE_URL: postgresql://excaliboard:${DB_PASSWORD}@postgres:5432/excaliboard
+      SYNC_BEARER: ${SYNC_BEARER}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      PHOENIX_COLLECTOR_ENDPOINT: ${PHOENIX_COLLECTOR_ENDPOINT:-http://100.107.79.35:6006}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      # Host binds: loopback for nginx/cloudflared, tailnet IP as LAN fallback.
+      - "127.0.0.1:8789:8789"
+      - "100.107.79.35:8789:8789"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8789/sync/healthz').status==200 else 1)
+
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: excaliboard-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: excaliboard
+      POSTGRES_USER: excaliboard
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      # Loopback only — backup_pg.sh dumps via 127.0.0.1:5436 (avoids Phoenix 5434).
+      - "127.0.0.1:5436:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U excaliboard"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

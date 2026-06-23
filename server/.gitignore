@@ -1,0 +1,14 @@
+# Secrets — never commit. Seeded from 1Password Mithra at deploy.
+.env
+
+# Local Postgres data (bind-mounted by docker-compose)
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
