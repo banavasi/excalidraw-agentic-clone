@@ -114,9 +114,9 @@ class InMemoryStore:
             return PushConflict(cur.scene_version, cur.iv, cur.ciphertext)
 
         # CAS hit (or a board with no scene yet -> nothing to conflict, recreate).
-        # Undelete: any push implies the board is live.
+        # A push does NOT revive a soft-deleted board — deletion wins (a stray or
+        # racing push can never bring a deleted board back).
         b["scene_version"] = new_version
-        b["deleted"] = False
         b["updated_at"] = _now_ms()
         if name is not None:
             b["name_iv"] = name.iv

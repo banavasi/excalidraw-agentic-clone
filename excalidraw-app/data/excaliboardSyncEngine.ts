@@ -546,6 +546,14 @@ export class SyncEngine {
   // -- delete propagation ---------------------------------------------------
 
   async softDelete(boardId: string): Promise<void> {
+    // Cancel any pending debounced push for this board — otherwise a stray push
+    // could land just after the delete (which the server would then refuse to
+    // revive, but there's no point firing it).
+    const timer = this.pushTimers.get(boardId);
+    if (timer) {
+      clearTimeout(timer);
+      this.pushTimers.delete(boardId);
+    }
     await this.deps.store.clearLastSynced(boardId);
     await this.deps.store.dequeue(boardId);
     try {

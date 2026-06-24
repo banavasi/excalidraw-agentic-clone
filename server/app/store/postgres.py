@@ -213,9 +213,10 @@ class PostgresStore:
                     # against -> fall through and (re)create the scene.
 
                 # CAS hit (or scene-less board). The FOR UPDATE lock above serializes
-                # concurrent pushers; undelete since any push implies the board is live.
+                # concurrent pushers. A push does NOT revive a soft-deleted board —
+                # deletion wins, so a stray/racing push can never bring a board back.
                 await conn.execute(
-                    "UPDATE board SET scene_version = $1, deleted = false, "
+                    "UPDATE board SET scene_version = $1, "
                     "updated_at = now(), "
                     "name_iv = COALESCE($4, name_iv), "
                     "name_ct = COALESCE($5, name_ct) "

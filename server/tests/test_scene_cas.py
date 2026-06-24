@@ -94,17 +94,23 @@ async def test_board_without_scene_recreates_not_crashes():
     assert sc is not None and sc.ciphertext == b"data"
 
 
-async def test_push_undeletes_board(client):
+async def test_push_does_not_undelete_board(client):
+    # A deleted board must STAY deleted — deletion wins. A stray/racing push (e.g. a
+    # debounced editor push that fires just after the user deletes the board) must
+    # never bring it back, or it reappears in the switcher on the next pull.
     await client.put(
         "/sync/boards/resurrect",
         json={"base_version": 0, "scene_version": 1, "iv": IV, "ciphertext": b(b"x")},
     )
     await client.delete("/sync/boards/resurrect")
-    # An edit after a delete resurrects the board (last-writer wins).
-    r = await client.put(
+    # An edit after the delete is accepted (scene stored) but does NOT revive it.
+    await client.put(
         "/sync/boards/resurrect",
         json={"base_version": 1, "scene_version": 2, "iv": IV, "ciphertext": b(b"y")},
     )
-    assert r.status_code == 200
+    # The board is still gone: GET 404 and the index row stays deleted.
     g = await client.get("/sync/boards/resurrect")
-    assert g.status_code == 200
+    assert g.status_code == 404
+    idx = (await client.get("/sync/index")).json()
+    row = next(r for r in idx if r["board_id"] == "resurrect")
+    assert row["deleted"] is True
