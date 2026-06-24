@@ -121,8 +121,50 @@
   }
 }
 
+// Excaliboard: the top-right Cloud-sync button (replaces the Excalidraw+ promo).
+.excaliboard-sync-banner {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--border-radius-lg);
+  font-family: var(--ui-font);
+  font-size: 0.8333rem;
+  box-sizing: border-box;
+  height: var(--lg-button-size);
+  border: none;
+  box-shadow: 0 0 0 1px var(--color-surface-lowest);
+  background-color: var(--color-surface-low);
+  color: var(--button-color, var(--color-on-surface));
+
+  svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .excaliboard-sync-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  &:hover {
+    background-color: var(--color-primary);
+    color: white;
+  }
+
+  &:active {
+    background-color: var(--color-primary-darker);
+    box-shadow: 0 0 0 1px var(--color-brand-active);
+  }
+}
+
 .theme--dark {
-  .plus-banner {
+  .plus-banner,
+  .excaliboard-sync-banner {
     &:hover {
       color: black !important;
     }
