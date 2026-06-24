@@ -8,7 +8,9 @@ import { getSyncConfig, isSyncConfigured } from "../data/excaliboardSync";
  * Cloud-sync dialog on click. Status is read from the saved config at render
  * (the app re-renders when the dialog saves) plus a live online/offline listener.
  */
-export const CloudSyncButton: React.FC<{ onOpen: () => void }> = ({ onOpen }) => {
+export const CloudSyncButton: React.FC<{ onOpen: () => void }> = ({
+  onOpen,
+}) => {
   const [online, setOnline] = useState(() =>
     typeof navigator !== "undefined" ? navigator.onLine : true,
   );
