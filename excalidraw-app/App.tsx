@@ -1165,7 +1165,10 @@ const ExcalidrawWrapper = () => {
       // resurrect an orphan IDB entry after deletion
       LocalData.cancelSave(id);
       const remaining = await deleteWorkboard(id);
-      softDeleteBoardSync(id);
+      // Await the server delete so the tombstone actually lands before we move on
+      // (and before the user can refresh) — a fire-and-forget DELETE is cancelled by
+      // a quick page refresh, leaving the board live so it reappears on the pull.
+      await softDeleteBoardSync(id);
       setWorkboards(remaining);
       setWorkboardThumbnails((prev) => {
         const next = { ...prev };

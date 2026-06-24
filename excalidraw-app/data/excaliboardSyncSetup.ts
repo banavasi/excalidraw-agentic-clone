@@ -104,10 +104,11 @@ export const pullExcaliboardSync = (): void => {
   void engine?.pull();
 };
 
-/** Propagate a local board deletion to the server (soft-delete tombstone). */
-export const softDeleteBoardSync = (boardId: string): void => {
-  void engine?.softDelete(boardId);
-};
+/** Propagate a local board deletion to the server (soft-delete tombstone). Returns a
+ * promise so callers can AWAIT it: a fire-and-forget DELETE gets cancelled by a page
+ * refresh, leaving the board live on the server (so it reappears on the next pull). */
+export const softDeleteBoardSync = (boardId: string): Promise<void> =>
+  engine?.softDelete(boardId) ?? Promise.resolve();
 
 /** Download missing image files for the active board (after a board switch). */
 export const downloadActiveBoardFiles = (): void => {
