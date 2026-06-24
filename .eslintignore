@@ -9,3 +9,6 @@ packages/excalidraw/types
 examples/**/public
 dev-dist
 coverage
+# EJS-templated (<% %> build-time gating); prettier's HTML formatter rewraps the
+# template tags across lines, so it's excluded from the prettier/lint check.
+excalidraw-app/index.html

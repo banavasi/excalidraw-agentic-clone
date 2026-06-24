@@ -26,8 +26,13 @@ umask 077
 cat > "$SVC_DIR/.env" <<EOF
 DB_PASSWORD=$(op read "op://Mithra/excaliboard-db-cosmos/password")
 SYNC_BEARER=$(op read "op://Mithra/excaliboard-sync-auth/static_bearer")
-# Tighten to the origin your client runs from (the fork's app host). "*" is fine for a
-# single-user E2E system (the bearer + client-only key are the real protection).
+# Cloudflare Access JWT door (Phase 6) — the browser's verified identity. Not secrets
+# (the aud + team domain are embedded in every Access JWT and the public JWKS URL); they
+# come from the "Excaliboard" Access app gating app.shashankshandilya.me.
+CF_ACCESS_TEAM_DOMAIN=cosmos-banavasi.cloudflareaccess.com
+CF_ACCESS_AUD=586b778c41bae2cda35788aa0d38d677efc0ed9878a0d3a02dc2f87b874d105c
+# Tighten to the origin your client runs from (the fork's app host). "*" is fine: the
+# real protection is Cloudflare Access (browser) + the static bearer (the MCP tool).
 CORS_ORIGINS=*
 PHOENIX_COLLECTOR_ENDPOINT=http://100.107.79.35:6006
 EOF

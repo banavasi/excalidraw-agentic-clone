@@ -1,23 +1,12 @@
 # Excaliboard Phase 5 — MCP server + agentic board creation (design spec)
 
-> **Status:** DEPLOYED + VERIFIED LIVE (2026-06-23) — **D1–D4 signed off**; the Python tool + the
-> `/excaliboard --sync` path are implemented, deployed to cosmos via the agentic-os CI/CD (PR #1, merged),
-> and verified live through the gateway (doctor `up`; op secrets resolve in-subprocess; `create→list→delete`
-> round-trip; hits the local sync origin `127.0.0.1:8789`). Depends on Phase 2 (cloud sync, live) + Phase 4
-> (`/excaliboard` skill).
+> **Status:** DEPLOYED + VERIFIED LIVE (2026-06-23) — **D1–D4 signed off**; the Python tool + the `/excaliboard --sync` path are implemented, deployed to cosmos via the agentic-os CI/CD (PR #1, merged), and verified live through the gateway (doctor `up`; op secrets resolve in-subprocess; `create→list→delete` round-trip; hits the local sync origin `127.0.0.1:8789`). Depends on Phase 2 (cloud sync, live) + Phase 4 (`/excaliboard` skill).
 >
-> **Built:** `~/workspaces/personal/agentic-os/tools/excaliboard/` (Python: `crypto.py` byte-compatible
-> with `encryption.ts`, `sync.py` REST client, `ops.py` + element validation, `cli.py`, `agentic.toml`,
-> 21 unit/cross-lang tests + a live e2e). Skill: `Scene.sync()` in `~/.claude/skills/excaliboard/lib/excaliboard.py`.
-> Decisions as built: **D1 Python**, **D2 cosmos**, **D3 CAS-overwrite v1**, **D4 skill-via-tool** — all
-> confirmed. **Live** at `mcp.shashankshandilya.me` as `excaliboard__{list,get,create,update,delete}`.
-> Remaining: the cross-device browser **render** check (open a tool-created board on a 2nd device + reload).
+> **Built:** `~/workspaces/personal/agentic-os/tools/excaliboard/` (Python: `crypto.py` byte-compatible with `encryption.ts`, `sync.py` REST client, `ops.py` + element validation, `cli.py`, `agentic.toml`, 21 unit/cross-lang tests + a live e2e). Skill: `Scene.sync()` in `~/.claude/skills/excaliboard/lib/excaliboard.py`. Decisions as built: **D1 Python**, **D2 cosmos**, **D3 CAS-overwrite v1**, **D4 skill-via-tool** — all confirmed. **Live** at `mcp.shashankshandilya.me` as `excaliboard__{list,get,create,update,delete}`. Remaining: the cross-device browser **render** check (open a tool-created board on a 2nd device + reload).
 
 ## 1. Goal & shape
 
-Let an **agent (Claude / MCP) and the `/excaliboard` skill create, read, and update boards in your
-synced account** — so a board authored by automation shows up on every device, exactly like one you
-drew. Two surfaces, one core:
+Let an **agent (Claude / MCP) and the `/excaliboard` skill create, read, and update boards in your synced account** — so a board authored by automation shows up on every device, exactly like one you drew. Two surfaces, one core:
 
 ```
 /excaliboard skill ─┐
@@ -28,56 +17,43 @@ MCP client (Claude) ─┘   encrypt locally · reconcile · push           (opa
 
 ## 2. The one architectural decision (signed off)
 
-The sync server is **E2E-opaque** — it can't create or read a board in plaintext. So the MCP tool and
-the skill act as **trusted headless clients**: they hold the **E2E key** (`op://Mithra/excaliboard-e2e-key`)
-and the **bearer** (`op://Mithra/excaliboard-sync-auth`), encrypt locally, and push. The key now lives
-wherever this automation runs (cosmos, via the gateway's `op` service account) — the natural single-user
-model. **Confirmed.**
+The sync server is **E2E-opaque** — it can't create or read a board in plaintext. So the MCP tool and the skill act as **trusted headless clients**: they hold the **E2E key** (`op://Mithra/excaliboard-e2e-key`) and the **bearer** (`op://Mithra/excaliboard-sync-auth`), encrypt locally, and push. The key now lives wherever this automation runs (cosmos, via the gateway's `op` service account) — the natural single-user model. **Confirmed.**
 
 ## 3. Crypto compatibility (the critical detail)
 
-A board created by the tool MUST decrypt in the browser. The client uses
-`encryptData` = **AES-128-GCM**, **12-byte IV**, key imported from the JWK `k` (base64url 16 bytes),
-output = `ciphertext || 16-byte tag` (WebCrypto). Python's `cryptography` `AESGCM` produces the identical
-layout, so the tool reuses it verbatim:
+A board created by the tool MUST decrypt in the browser. The client uses `encryptData` = **AES-128-GCM**, **12-byte IV**, key imported from the JWK `k` (base64url 16 bytes), output = `ciphertext || 16-byte tag` (WebCrypto). Python's `cryptography` `AESGCM` produces the identical layout, so the tool reuses it verbatim:
+
 - key = `base64url-decode(JWK k)` (16 bytes) → `AESGCM(key)`
 - `iv = os.urandom(12)`; `blob = AESGCM.encrypt(iv, json.dumps(elements).encode(), None)` → store `iv` + `blob` (base64), exactly the Phase-2 wire shape.
 - `scene_version = sum(el["version"] for el in elements)` (matches `getSceneVersion`).
 - board name encrypted the same way (Part-1 `name_iv`/`name_ct`).
 
-This is verified-by-construction against `packages/excalidraw/data/encryption.ts`; a round-trip test
-(Python encrypt → JS decrypt and vice-versa) is the gate.
+This is verified-by-construction against `packages/excalidraw/data/encryption.ts`; a round-trip test (Python encrypt → JS decrypt and vice-versa) is the gate.
 
 ## 4. The `excaliboard` tool (agentic-os pattern)
 
-Per `build:agentic-os-tools`: a tool with an `agentic.toml`, invoked through the FastAPI gateway, each op
-exposed as **REST + an MCP tool `excaliboard__<op>`** at `mcp.shashankshandilya.me`.
+Per `build:agentic-os-tools`: a tool with an `agentic.toml`, invoked through the FastAPI gateway, each op exposed as **REST + an MCP tool `excaliboard__<op>`** at `mcp.shashankshandilya.me`.
 
 | Op | Does |
-|---|---|
+| --- | --- |
 | `excaliboard__list` | `GET /sync/index` → decrypt names → `[{board_id, name, scene_version}]` |
 | `excaliboard__get` | `GET /sync/boards/{id}` (+ files) → decrypt → elements |
 | `excaliboard__create` | encrypt elements + name → `PUT` a new board (uuid, base_version 0); push files |
 | `excaliboard__update` | pull → `reconcileElements`-equivalent → re-encrypt → `PUT` (CAS, retry on 409) |
 | `excaliboard__delete` | `DELETE /sync/boards/{id}` |
 
-- **Language: Python** (pragmatic — the `/excaliboard` skill + the crypto + the scene authoring are all
-  Python; ⚠️ diverges from the Rust-CLI default in `build:agentic-os-tools` — calling it out for sign-off).
+- **Language: Python** (pragmatic — the `/excaliboard` skill + the crypto + the scene authoring are all Python; ⚠️ diverges from the Rust-CLI default in `build:agentic-os-tools` — calling it out for sign-off).
 - Runs where the gateway runs (cosmos), reading secrets via the `op` service account.
-- Reconcile on update: v1 can be **last-writer (CAS overwrite)** since the agent rarely races a human;
-  full `reconcileElements` parity is a follow-up. (Decision to confirm.)
+- Reconcile on update: v1 can be **last-writer (CAS overwrite)** since the agent rarely races a human; full `reconcileElements` parity is a follow-up. (Decision to confirm.)
 
 ## 5. The `/excaliboard` skill → synced boards
 
-The skill already authors a real `.excalidraw` scene (verified against the editor's restore pipeline).
-Add a **"create into my synced account"** path: after authoring, call `excaliboard__create` (or the REST
-endpoint) with the elements + a name. The board appears on every device via Part-1 index sync. Keeps the
-existing `~/brain` filing as an option (`--no-sync`).
+The skill already authors a real `.excalidraw` scene (verified against the editor's restore pipeline). Add a **"create into my synced account"** path: after authoring, call `excaliboard__create` (or the REST endpoint) with the elements + a name. The board appears on every device via Part-1 index sync. Keeps the existing `~/brain` filing as an option (`--no-sync`).
 
 ## 6. KEY DECISIONS (recommendations)
 
 | # | Decision | Recommended | Why |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | D1 | Tool language | **Python** | reuse the skill's authoring + crypto; the Rust default doesn't fit a JS-crypto/scene domain |
 | D2 | Where it runs | **cosmos (gateway)** | `op` service account already there; same box as the sync server (low latency) |
 | D3 | Update conflict policy | **CAS overwrite v1** | agent-vs-human races are rare; full reconcile is a follow-up |
@@ -85,8 +61,7 @@ existing `~/brain` filing as an option (`--no-sync`).
 
 ## 7. Definition of done
 
-- `excaliboard__create` from Claude (or `/excaliboard --sync`) produces a board that **opens and renders
-  in the browser** (round-trip crypto verified), named, on every device.
+- `excaliboard__create` from Claude (or `/excaliboard --sync`) produces a board that **opens and renders in the browser** (round-trip crypto verified), named, on every device.
 - `list`/`get`/`update`/`delete` work over MCP; secrets only from 1P Mithra; tool registered in the gateway.
 - No change to the opaque sync server (it already stores everything the tool needs).
 
