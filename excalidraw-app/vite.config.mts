@@ -11,6 +11,10 @@ import { woff2BrowserPlugin } from "../scripts/woff2/woff2-vite-plugins";
 export default defineConfig(({ mode }) => {
   // To load .env variables
   const envVars = loadEnv(mode, `../`);
+  // Excaliboard self-host build: ship a self-destroying service worker so a stale PWA
+  // cache can't pin users to an old build — it unregisters any installed worker and
+  // clears its caches, so every deploy lands on the next load (no "clear site data").
+  const selfHost = envVars.VITE_APP_SELFHOST === "true";
   // https://vitejs.dev/config/
   return {
     server: {
@@ -149,6 +153,10 @@ export default defineConfig(({ mode }) => {
       ViteEjsPlugin(),
       VitePWA({
         registerType: "autoUpdate",
+        // Self-host: a self-destroying SW unregisters any installed worker + clears
+        // its caches, so deploys land immediately (no stale build; no clearing site
+        // data, which would also wipe the saved Cloud-sync bearer + E2E key).
+        selfDestroying: selfHost,
         devOptions: {
           /* set this flag to true to enable in Development mode */
           enabled: envVars.VITE_APP_ENABLE_PWA === "true",
