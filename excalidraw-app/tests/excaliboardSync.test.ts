@@ -490,7 +490,7 @@ describe("SyncEngine board-list (name) sync", () => {
     await engine.pushBoard("board-1");
 
     const body = backend.putCalls[0].body;
-    expect(body.name_iv).toBeTruthy();
+    expect(typeof body.name_iv).toBe("string"); // iv vestigial since E2E dropped
     expect(body.name_ct).toBeTruthy();
     const name = await decryptString(
       key,

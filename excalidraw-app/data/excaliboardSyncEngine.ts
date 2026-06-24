@@ -521,11 +521,13 @@ export class SyncEngine {
   /** Decrypt + register a server board into the local switcher. */
   private async registerBoard(row: IndexRow): Promise<boolean> {
     let name = "Untitled board";
-    if (row.nameIv && row.nameCt) {
+    // Name presence is the ciphertext; the iv is vestigial (empty) since E2E was
+    // dropped (see excaliboardSync.ts), so don't gate on row.nameIv being truthy.
+    if (row.nameCt) {
       try {
         name = await decryptString(
           this.deps.getKey(),
-          fromBase64(row.nameIv),
+          fromBase64(row.nameIv ?? ""), // iv ignored (E2E dropped); may be null/empty
           fromBase64(row.nameCt),
         );
       } catch {

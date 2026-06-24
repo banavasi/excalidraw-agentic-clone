@@ -34,6 +34,14 @@ def build_router() -> APIRouter:
             },
         )
 
+    @r.get("/sync/whoami")
+    async def whoami(
+        request: Request,
+        user_id: str = Depends(require_user),
+    ) -> dict:
+        # email is set only on the Cloudflare Access (browser) door; None for bearer.
+        return {"email": getattr(request.state, "email", None)}
+
     @r.get("/sync/index")
     async def get_index(
         request: Request,
