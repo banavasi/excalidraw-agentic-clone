@@ -124,6 +124,10 @@ export class SyncEngine {
   private pulling = false;
   private indexCursor: number | null = null;
   private pullInterval: ReturnType<typeof setInterval> | null = null;
+  // Boards deleted locally this session — a pull must NOT re-register them while the
+  // DELETE is still in-flight (it races the pull) or if a stray push briefly revived
+  // them. Cleared once the server's index confirms the tombstone (row.deleted).
+  private locallyDeleted = new Set<string>();
   private onlineHandler = () => {
     void this.flushOutbox();
   };
@@ -441,9 +445,17 @@ export class SyncEngine {
       for (const row of rows) {
         this.indexCursor = Math.max(this.indexCursor ?? 0, row.updatedAt);
         if (row.deleted) {
+          this.locallyDeleted.delete(row.boardId); // server confirms the tombstone
           if (await this.handleRemoteDelete(row.boardId)) {
             touched = true;
           }
+          continue;
+        }
+        if (this.locallyDeleted.has(row.boardId)) {
+          // We deleted this locally but the server still shows it live (the DELETE
+          // is in-flight, or a stray push beat us). Re-assert the delete and do NOT
+          // re-register it into the switcher.
+          void this.deps.backend.deleteBoard(row.boardId);
           continue;
         }
         // Surface the board in the local switcher (decrypt + register its name),
@@ -546,6 +558,8 @@ export class SyncEngine {
   // -- delete propagation ---------------------------------------------------
 
   async softDelete(boardId: string): Promise<void> {
+    // Remember it so a pull racing the in-flight DELETE doesn't re-register it.
+    this.locallyDeleted.add(boardId);
     // Cancel any pending debounced push for this board — otherwise a stray push
     // could land just after the delete (which the server would then refuse to
     // revive, but there's no point firing it).

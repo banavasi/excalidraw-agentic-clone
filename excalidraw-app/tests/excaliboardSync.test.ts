@@ -352,6 +352,36 @@ describe("SyncEngine.pull", () => {
     expect(boards.removed).toContain("gone");
     expect(await store.getLastSynced("gone")).toBeNull();
   });
+
+  it("does not re-register a board deleted this session (delete racing the pull)", async () => {
+    const backend = new MockBackend();
+    const boards = new FakeBoardStore();
+    const { engine, store } = makeEngine({
+      backend,
+      boards,
+      getKey: () => key,
+      activeBoardId: "other",
+    });
+    await store.setLastSynced("deleting", 1);
+
+    await engine.softDelete("deleting");
+
+    // the server STILL returns the board as live (its DELETE hasn't landed yet) —
+    // the pull must not put it back into the switcher.
+    backend.indexRows = [
+      {
+        boardId: "deleting",
+        nameIv: null,
+        nameCt: null,
+        sceneVersion: 1,
+        deleted: false,
+        updatedAt: 9,
+      },
+    ];
+    await engine.pull();
+
+    expect(boards.names.has("deleting")).toBe(false);
+  });
 });
 
 describe("SyncEngine image/file sync", () => {
