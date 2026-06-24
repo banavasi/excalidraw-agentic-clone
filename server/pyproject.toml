@@ -9,6 +9,7 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.5",
     "asyncpg>=0.30",
+    "pyjwt[crypto]>=2.9",
 ]
 
 [project.optional-dependencies]

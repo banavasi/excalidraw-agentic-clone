@@ -24,8 +24,16 @@ class Settings(BaseSettings):
     # None => InMemoryStore (dev/tests). A postgresql:// DSN => PostgresStore.
     database_url: str | None = None
 
-    # Static bearer token. Empty => the service fails closed (rejects everything).
+    # Static bearer token — the MACHINE door (the MCP tool, which can't ride a
+    # browser cookie). Empty => the bearer door is closed.
     sync_bearer: str = ""
+
+    # Cloudflare Access (the BROWSER door): verify the signed JWT Access injects as
+    # `Cf-Access-Jwt-Assertion`. team_domain => issuer `https://<team_domain>` and
+    # JWKS `https://<team_domain>/cdn-cgi/access/certs`; aud is the Access app's AUD
+    # tag. BOTH empty => the JWT door is disabled (bearer-only; tests/local dev).
+    cf_access_team_domain: str = ""
+    cf_access_aud: str = ""
 
     # Hard cap on a single decoded scene ciphertext (anti-DoS). Default 25 MiB.
     max_ciphertext_bytes: int = 25 * 1024 * 1024

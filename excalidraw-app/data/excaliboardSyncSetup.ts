@@ -73,12 +73,13 @@ export const initExcaliboardSync = (opts: {
     return;
   }
   engine = new SyncEngine({
-    backend: new RestSyncBackend(config),
+    // serverUrl "" = same-origin: the browser rides the Cloudflare Access cookie.
+    backend: new RestSyncBackend({ serverUrl: "" }),
     store: new IdbSyncStore(),
     bridge: createEditorBridge(opts.excalidrawAPI),
     boards: createBoardStore(),
     getActiveBoardId: opts.getActiveBoardId,
-    getKey: () => config.encryptionKey,
+    getKey: () => "", // E2E dropped (D4); the engine threads this through as a no-op.
     now: () => Date.now(),
     onBoardsChanged: opts.onBoardsChanged,
   });

@@ -66,6 +66,15 @@ def create_app(store: Store | None = None, settings: Settings | None = None) -> 
     app.state.settings = settings
     app.state.store = store
 
+    # Cloudflare Access JWT verifier (the browser door). None => bearer-only door.
+    app.state.cf_jwks_client = None
+    if settings.cf_access_team_domain and settings.cf_access_aud:
+        from jwt import PyJWKClient
+
+        app.state.cf_jwks_client = PyJWKClient(
+            f"https://{settings.cf_access_team_domain}/cdn-cgi/access/certs"
+        )
+
     # Body-limit runs just inside CORS (added first => inner), so it still rejects
     # oversized bodies before routing/buffering while CORS decorates the 413.
     app.add_middleware(BodySizeLimitMiddleware, max_body_bytes=settings.max_body_bytes)

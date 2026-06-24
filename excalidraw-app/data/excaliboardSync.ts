@@ -1,21 +1,16 @@
 /**
- * Excaliboard Phase 2 — cloud sync primitives (config, crypto, REST backend, store).
+ * Excaliboard — cloud sync primitives (config, (de)serialization, REST backend, store).
  *
- * The server is an opaque-ciphertext blob store; ALL encryption happens here with
- * a client-only key, and conflict resolution (reconcileElements) runs client-side
- * (see {@link SyncEngine}). This module deliberately reuses the editor's existing
- * `encryptData`/`decryptData` (AES-128-GCM / JWK) verbatim — same primitives the
- * collab + firebase paths use — so the server never sees plaintext.
+ * The server is an opaque blob store; conflict resolution (reconcileElements) runs
+ * client-side (see {@link SyncEngine}). Phase 6 dropped E2E (the server is your own
+ * trusted box behind Cloudflare Access — see docs/design/phase6-identity-auth.md), so
+ * the scene travels as plaintext (base64) in the same { iv, ciphertext } envelope; the
+ * `key` params are vestigial no-ops kept so the engine + its tests stay untouched.
  *
  * Backend and store are interfaces so the engine is unit-testable with in-memory
  * fakes (no browser, IndexedDB, or live server required).
  */
 
-import {
-  decryptData,
-  encryptData,
-  generateEncryptionKey,
-} from "@excalidraw/excalidraw/data/encryption";
 import { createStore, del, get, set, keys } from "idb-keyval";
 
 import type { ExcalidrawElement } from "@excalidraw/element/types";
@@ -27,12 +22,6 @@ import type { ExcalidrawElement } from "@excalidraw/element/types";
 const SYNC_CONFIG_KEY = "excaliboard:sync-config";
 
 export interface SyncConfig {
-  /** Base URL of the sync service, e.g. https://sync.example.me (no trailing /). */
-  serverUrl: string;
-  /** Static bearer token (matches the server's SYNC_BEARER). */
-  bearer: string;
-  /** E2E AES-128-GCM key as a JWK string (from generateEncryptionKey()). */
-  encryptionKey: string;
   /** Master on/off switch. */
   enabled: boolean;
 }
@@ -44,18 +33,12 @@ export const getSyncConfig = (): SyncConfig | null => {
       return null;
     }
     const parsed = JSON.parse(raw);
-    if (
-      parsed &&
-      typeof parsed.serverUrl === "string" &&
-      typeof parsed.bearer === "string" &&
-      typeof parsed.encryptionKey === "string"
-    ) {
-      return {
-        serverUrl: parsed.serverUrl.replace(/\/+$/, ""),
-        bearer: parsed.bearer,
-        encryptionKey: parsed.encryptionKey,
-        enabled: !!parsed.enabled,
-      };
+    // Tolerates legacy blobs (serverUrl/bearer/encryptionKey) — all ignored now.
+    // Dropping the stored serverUrl is deliberate: a legacy cross-origin URL would
+    // defeat the same-origin CF_Authorization cookie. The browser is always
+    // same-origin (relative /sync/); identity = Cloudflare Access; no E2E key.
+    if (parsed && typeof parsed === "object") {
+      return { enabled: !!parsed.enabled };
     }
   } catch (error: any) {
     console.error(error);
@@ -70,10 +53,7 @@ export const setSyncConfig = (config: SyncConfig | null): void => {
     } else {
       localStorage.setItem(
         SYNC_CONFIG_KEY,
-        JSON.stringify({
-          ...config,
-          serverUrl: config.serverUrl.replace(/\/+$/, ""),
-        }),
+        JSON.stringify({ enabled: config.enabled }),
       );
     }
   } catch (error: any) {
@@ -83,17 +63,12 @@ export const setSyncConfig = (config: SyncConfig | null): void => {
 
 export const isSyncConfigured = (
   config: SyncConfig | null,
-): config is SyncConfig =>
-  !!(
-    config &&
-    config.enabled &&
-    config.serverUrl &&
-    config.bearer &&
-    config.encryptionKey
-  );
+): config is SyncConfig => !!(config && config.enabled);
 
-/** Generate a fresh E2E key (JWK string) for first-time setup. */
-export const generateSyncKey = (): Promise<string> => generateEncryptionKey();
+// ponytail: E2E was dropped (the server is your own trusted box), so there is no
+// key to generate. Retained as a no-op only so the engine's unit tests — which
+// still thread a (now-ignored) key through getKey — stay untouched.
+export const generateSyncKey = (): Promise<string> => Promise.resolve("");
 
 // ---------------------------------------------------------------------------
 // base64 <-> bytes (standard base64, interops with the server's b64)
@@ -119,57 +94,53 @@ export const fromBase64 = (b64: string): Uint8Array<ArrayBuffer> => {
 };
 
 // ---------------------------------------------------------------------------
-// crypto — element[] <-> { iv, ciphertext } (ported from firebase.ts verbatim)
+// (de)serialization — element[] / strings <-> the { iv, ciphertext } envelope.
+//
+// ponytail: E2E was dropped (D4 — the server is your own trusted cosmos box behind
+// Cloudflare Access). The opaque-blob WIRE and the server are unchanged: plaintext
+// (base64) just goes in the `ciphertext` field with an empty `iv`. The `_key` params
+// and the `encrypt*`/`decrypt*` names are kept so the engine call sites barely move
+// (the only ripple: a name-presence guard now keys on the ciphertext, since iv is empty).
 // ---------------------------------------------------------------------------
 
 export const encryptElements = async (
-  key: string,
+  _key: string,
   elements: readonly ExcalidrawElement[],
 ): Promise<{ iv: Uint8Array<ArrayBuffer>; ciphertext: ArrayBuffer }> => {
   const encoded = new TextEncoder().encode(JSON.stringify(elements));
-  const { encryptedBuffer, iv } = await encryptData(key, encoded);
-  return { iv, ciphertext: encryptedBuffer };
+  return { iv: new Uint8Array(0), ciphertext: encoded.buffer as ArrayBuffer };
 };
 
 export const decryptElements = async (
-  key: string,
-  iv: Uint8Array<ArrayBuffer>,
+  _key: string,
+  _iv: Uint8Array<ArrayBuffer>,
   ciphertext: Uint8Array<ArrayBuffer>,
-): Promise<readonly ExcalidrawElement[]> => {
-  const decrypted = await decryptData(iv, ciphertext, key);
-  const decoded = new TextDecoder("utf-8").decode(new Uint8Array(decrypted));
-  return JSON.parse(decoded);
-};
+): Promise<readonly ExcalidrawElement[]> =>
+  JSON.parse(new TextDecoder("utf-8").decode(ciphertext));
 
-/** Encrypt arbitrary bytes (e.g. a file's dataURL) for the blob store. */
+/** Pack arbitrary bytes (e.g. a file's dataURL) into the blob envelope. */
 export const encryptBytes = async (
-  key: string,
+  _key: string,
   data: Uint8Array<ArrayBuffer>,
-): Promise<{ iv: string; ciphertext: string }> => {
-  const { encryptedBuffer, iv } = await encryptData(key, data);
-  return { iv: toBase64(iv), ciphertext: toBase64(encryptedBuffer) };
-};
+): Promise<{ iv: string; ciphertext: string }> => ({
+  iv: "",
+  ciphertext: toBase64(data),
+});
 
-/** Encrypt a string (e.g. an image's dataURL) → base64 {iv, ciphertext}. */
+/** Pack a string (e.g. an image's dataURL) → base64 {iv, ciphertext}. */
 export const encryptString = async (
-  key: string,
+  _key: string,
   text: string,
-): Promise<{ iv: string; ciphertext: string }> => {
-  const { encryptedBuffer, iv } = await encryptData(
-    key,
-    new TextEncoder().encode(text),
-  );
-  return { iv: toBase64(iv), ciphertext: toBase64(encryptedBuffer) };
-};
+): Promise<{ iv: string; ciphertext: string }> => ({
+  iv: "",
+  ciphertext: toBase64(new TextEncoder().encode(text)),
+});
 
 export const decryptString = async (
-  key: string,
-  iv: Uint8Array<ArrayBuffer>,
+  _key: string,
+  _iv: Uint8Array<ArrayBuffer>,
   ciphertext: Uint8Array<ArrayBuffer>,
-): Promise<string> => {
-  const decrypted = await decryptData(iv, ciphertext, key);
-  return new TextDecoder("utf-8").decode(new Uint8Array(decrypted));
-};
+): Promise<string> => new TextDecoder("utf-8").decode(ciphertext);
 
 // ---------------------------------------------------------------------------
 // REST backend
@@ -228,18 +199,24 @@ export class SyncHttpError extends Error {
 
 export class RestSyncBackend implements SyncBackend {
   private base: string;
-  private bearer: string;
+  private bearer?: string;
 
-  constructor(config: Pick<SyncConfig, "serverUrl" | "bearer">) {
-    this.base = config.serverUrl.replace(/\/+$/, "");
+  /**
+   * `serverUrl` "" = same-origin (the browser rides the Cloudflare Access cookie; no
+   * Authorization header needed). `bearer` is only for non-browser callers (the live
+   * integration test / the MCP tool) that can't present a CF cookie.
+   */
+  constructor(config: { serverUrl: string; bearer?: string }) {
+    this.base = (config.serverUrl ?? "").replace(/\/+$/, "");
     this.bearer = config.bearer;
   }
 
   private headers(): HeadersInit {
-    return {
-      Authorization: `Bearer ${this.bearer}`,
-      "Content-Type": "application/json",
-    };
+    const h: Record<string, string> = { "Content-Type": "application/json" };
+    if (this.bearer) {
+      h.Authorization = `Bearer ${this.bearer}`;
+    }
+    return h;
   }
 
   async getIndex(sinceMs: number | null): Promise<IndexRow[]> {
