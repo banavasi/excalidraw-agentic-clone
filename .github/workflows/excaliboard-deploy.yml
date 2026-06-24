@@ -6,7 +6,7 @@ name: excaliboard deploy
 
 on:
   push:
-    branches: [add-new-workboard]
+    branches: [main]
     paths:
       - "server/**"
       - ".github/workflows/excaliboard-deploy.yml"

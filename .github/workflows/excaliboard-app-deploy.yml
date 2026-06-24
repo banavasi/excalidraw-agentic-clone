@@ -7,7 +7,7 @@ name: excaliboard app deploy
 
 on:
   push:
-    branches: [add-new-workboard]
+    branches: [main]
     paths:
       - "excalidraw-app/**"
       - "packages/**"
