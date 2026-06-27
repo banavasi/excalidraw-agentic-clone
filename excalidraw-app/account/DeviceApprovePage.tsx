@@ -1,0 +1,78 @@
+import React, { useState } from "react";
+
+import { approveDevice } from "./authClient";
+import { s } from "./authStyles";
+
+/**
+ * Device-flow approval (/device?code=…). The user is already signed in (the gate
+ * guarantees it), so approving links the polling agent (local Claude/Codex) to
+ * THIS account.
+ */
+export const DeviceApprovePage: React.FC<{ email?: string | null }> = ({ email }) => {
+  const [code, setCode] = useState(
+    new URLSearchParams(window.location.search).get("code") || "",
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const approve = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      const r = await approveDevice(code.trim().toUpperCase());
+      if (r.ok) {
+        setDone(true);
+      } else {
+        setError(r.data?.detail || "That code is invalid or expired.");
+      }
+    } catch {
+      setError("Network error — is the server running?");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={s.page}>
+      <form style={s.card} onSubmit={approve}>
+        <div style={s.brand}>Connect a device</div>
+        {done ? (
+          <>
+            <div style={s.notice}>
+              Approved! Your terminal agent is now connected to this account. You
+              can close this tab.
+            </div>
+            <button
+              type="button"
+              style={s.primary}
+              onClick={() => window.location.assign("/")}
+            >
+              Back to Excaliboard
+            </button>
+          </>
+        ) : (
+          <>
+            <div style={s.sub}>
+              {email ? `Signed in as ${email}. ` : ""}A local agent wants to act on
+              your boards. Confirm the code it showed you.
+            </div>
+            <label style={s.label}>Device code</label>
+            <input
+              style={{ ...s.input, letterSpacing: "0.2em", textAlign: "center", fontSize: 18 }}
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="XXXX-XXXX"
+              autoFocus
+            />
+            {error && <div style={s.error}>{error}</div>}
+            <button type="submit" style={s.primary} disabled={busy || !code.trim()}>
+              {busy ? "…" : "Approve device"}
+            </button>
+          </>
+        )}
+      </form>
+    </div>
+  );
+};

@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from "react";
 
+import { logout } from "../account/authClient";
 import { getSyncConfig, setSyncConfig } from "../data/excaliboardSync";
 
 import type { SyncConfig } from "../data/excaliboardSync";
 
 /**
- * Cloud-sync settings, Phase 6: zero secrets. Identity comes from Cloudflare Access
- * (the app sits behind its email gate), and E2E was dropped (the server is your own
- * trusted box) — so there's nothing to paste. Just an on/off toggle, plus a read-out
- * of who you're signed in as (GET /sync/whoami, same-origin → rides the CF cookie).
+ * Cloud-sync settings (Phase 7): identity is your in-app account (the session
+ * cookie), E2E is dropped, so there's nothing to paste — just an on/off toggle,
+ * a read-out of who you're signed in as (GET /sync/whoami), and a sign-out.
  */
 export const SyncSettingsDialog: React.FC<{
   onClose: () => void;
@@ -70,13 +70,9 @@ export const SyncSettingsDialog: React.FC<{
             <>
               <span style={styles.muted}>Signed in as</span>
               <strong>{identity}</strong>
-              <span style={styles.muted}>verified by Cloudflare</span>
             </>
           ) : (
-            <span style={styles.muted}>
-              Not signed in via Cloudflare Access (sync auth will be unavailable
-              until this app is behind the Access gate).
-            </span>
+            <span style={styles.muted}>Signed in.</span>
           )}
         </div>
 
@@ -90,6 +86,19 @@ export const SyncSettingsDialog: React.FC<{
         </label>
 
         <div style={styles.actions}>
+          <button
+            type="button"
+            onClick={async () => {
+              // Just drop the session + reload. Board state is NOT wiped here —
+              // re-login as the same account keeps your boards; a different
+              // account triggers a clean reset in AuthGate before the editor boots.
+              await logout();
+              window.location.assign("/");
+            }}
+            style={{ ...styles.button, marginRight: "auto", color: "#b42318" }}
+          >
+            Sign out
+          </button>
           <button type="button" onClick={onClose} style={styles.button}>
             Cancel
           </button>
