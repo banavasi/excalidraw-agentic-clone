@@ -246,14 +246,17 @@ async def test_admin_email_adoption_keeps_legacy_boards():
     async with LifespanManager(app):
         owner = await store.get_user_by_email("owner@example.com")
         assert owner is not None
-        assert owner.role == "admin" and owner.auth_method == "google"
+        # adopted as a passwordless local admin -> claimable via "Forgot password"
+        assert owner.role == "admin" and owner.auth_method == "local"
+        assert owner.password_hash is None
         assert owner.id == sid == app.state.single_user_id  # same row, boards intact
         idx = await store.get_index(owner.id, None)
         assert any(r.board_id == "old-board" for r in idx)
 
-        # a Google sign-in with that email logs into the SAME adopted account
-        same = await store.upsert_google_user("owner@example.com", "g-sub", "Owner")
-        assert same.id == owner.id
+        # it's a local account now, so a Google sign-in with that email is rejected
+        # (no silent auto-link) — consistent with the collision rule
+        with pytest.raises(EmailTaken):
+            await store.upsert_google_user("owner@example.com", "g-sub", "Owner")
 
 
 async def test_empty_legacy_not_adopted_so_admin_can_sign_up():

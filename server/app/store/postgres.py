@@ -518,9 +518,11 @@ class PostgresStore:
                 )
                 if taken:
                     return None
+                # auth_method='local' (no password) so the operator can claim it via
+                # "Forgot password" — works even when Google sign-in isn't enabled.
                 row = await conn.fetchrow(
                     "UPDATE app_user SET email = $2, email_verified = true, "
-                    "role = 'admin', auth_method = 'google' WHERE id = $1 RETURNING *",
+                    "role = 'admin', auth_method = 'local' WHERE id = $1 RETURNING *",
                     legacy["id"],
                     email,
                 )

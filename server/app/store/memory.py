@@ -336,7 +336,8 @@ class InMemoryStore:
         row["email"] = email
         row["email_verified"] = True
         row["role"] = "admin"
-        row["auth_method"] = "google"
+        # 'local' (no password) so the operator can claim it via "Forgot password".
+        row["auth_method"] = "local"
         self._email_index[email.lower()] = row["id"]
         return _to_user(row)
 
