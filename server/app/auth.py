@@ -1,25 +1,32 @@
-"""Two-door auth (single-user v1).
+"""Auth doors (Phase 7 multi-user).
 
-The BROWSER authenticates with the Cloudflare Access JWT (``Cf-Access-Jwt-Assertion``
-header, or the ``CF_Authorization`` cookie) — Access already verified the email via
-Google OIDC; we re-verify the signature so a spoofed header on the tailnet/bearer path
-can't impersonate. The MACHINE (MCP tool) authenticates with the static bearer.
+``require_user`` resolves a request to a real per-user id via, in order:
 
-Either valid identity maps to ``request.app.state.single_user_id`` (one human, one
-account). A JWT that is present-but-invalid fails closed (401, never falls through to
-the bearer). If Cloudflare Access isn't configured (no aud/team), the JWT door is simply
-absent and only the bearer is honored — that's the test/local-dev path.
+1. **Session cookie** (browser) — a signed ``{uid, epoch}`` cookie. The user is
+   re-loaded every request and rejected if ``disabled``, if the cookie's epoch is
+   stale (``session_epoch`` was bumped → logout-everywhere / disable / password
+   change), or if a local account is unverified.
+2. **Per-user API token** (Phase 8 MCP) — ``Authorization: Bearer exb_…``, resolved
+   by SHA-256 hash to its owning user.
+3. **Legacy static bearer** (deprecated) — the single ``SYNC_BEARER`` still maps to
+   the original single-user account, so the existing MCP tool keeps working until
+   the device-flow tokens replace it. (Cloudflare Access, if deployed, is now just
+   a network gate in front — no longer an identity source.)
+
+The resolved ``User`` is stashed on ``request.state.user`` (and ``.email``) so
+routes and ``require_admin`` can read role/identity without a second lookup.
 """
 
 from __future__ import annotations
 
-import logging
 import secrets
 
 from fastapi import HTTPException, Request
-from fastapi.concurrency import run_in_threadpool
 
-log = logging.getLogger("excaliboard")
+from .security import cookie_secure, hash_token
+from .store.base import User
+
+SESSION_COOKIE = "exb_session"
 
 _UNAUTH = HTTPException(
     status_code=401,
@@ -37,66 +44,95 @@ def _extract_bearer(authorization: str | None) -> str:
     return parts[1].strip()
 
 
-def _cf_jwt(request: Request) -> str:
-    """The Cloudflare Access assertion, from the injected header or the cookie."""
-    return (
-        request.headers.get("cf-access-jwt-assertion")
-        or request.cookies.get("CF_Authorization")
-        or ""
-    )
-
-
-async def _verify_cf_access(request: Request) -> dict | None:
-    """Return the verified Access claims, or None if the JWT door is absent/empty.
-
-    Raises 401 if a token IS present but fails verification (bad signature, wrong
-    audience/issuer, expired) — a present-but-bad token must never fall through.
-    """
-    settings = request.app.state.settings
-    client = getattr(request.app.state, "cf_jwks_client", None)
-    if not settings.cf_access_aud or not settings.cf_access_team_domain or client is None:
-        return None  # JWT door disabled (no Cloudflare Access configured)
-    token = _cf_jwt(request)
-    if not token:
-        return None  # let the bearer door try
-    import jwt  # PyJWT — lazy so the bearer-only path needs no crypto dep at import
-
-    try:
-        signing_key = await run_in_threadpool(
-            client.get_signing_key_from_jwt, token
-        )
-        return jwt.decode(
-            token,
-            signing_key.key,
-            algorithms=["RS256"],
-            audience=settings.cf_access_aud,
-            issuer=f"https://{settings.cf_access_team_domain}",
-            options={"require": ["exp", "aud", "iss"]},
-        )
-    except jwt.InvalidTokenError as exc:
-        # Token is PRESENT but cryptographically/claim-invalid (bad signature, aud,
-        # iss, expired, garbage) — fail closed, never fall through to the bearer.
-        raise _UNAUTH from exc
-    except Exception:  # noqa: BLE001
-        # Could not EVALUATE the JWT door (e.g. JWKS endpoint briefly unreachable).
-        # Don't take the machine/bearer door down with it: return None so require_user
-        # can still honor a valid bearer. A browser request (no bearer) then 401s
-        # anyway at the end of require_user — unavoidable while JWKS is unreachable.
-        log.warning("cloudflare access JWT could not be evaluated (JWKS?)", exc_info=True)
+async def _from_cookie(request: Request) -> User | None:
+    tokens = getattr(request.app.state, "tokens", None)
+    if tokens is None:
         return None
+    raw = request.cookies.get(SESSION_COOKIE)
+    if not raw:
+        return None
+    settings = request.app.state.settings
+    data = tokens.read_session(raw, settings.session_ttl_seconds)
+    if not data:
+        return None
+    user = await request.app.state.store.get_user_by_id(data.get("uid", ""))
+    if user is None or user.disabled:
+        return None
+    if user.session_epoch != data.get("epoch"):
+        return None  # epoch bumped -> this cookie is revoked
+    if user.auth_method == "local" and not user.email_verified:
+        return None
+    return user
+
+
+async def _from_bearer(request: Request) -> User | None:
+    token = _extract_bearer(request.headers.get("authorization"))
+    if not token:
+        return None
+    store = request.app.state.store
+    settings = request.app.state.settings
+    # Per-user API token (Phase 8).
+    uid = await store.user_id_for_token(hash_token(token))
+    if uid:
+        user = await store.get_user_by_id(uid)
+        if user and not user.disabled:
+            return user
+        return None
+    # Legacy static bearer -> the original single-user account (deprecated).
+    expected = settings.sync_bearer
+    sid = getattr(request.app.state, "single_user_id", None)
+    if expected and sid and secrets.compare_digest(token, expected):
+        user = await store.get_user_by_id(sid)
+        if user and not user.disabled:
+            return user
+    return None
+
+
+async def current_user(request: Request) -> User | None:
+    user = await _from_cookie(request)
+    if user is None:
+        user = await _from_bearer(request)
+    if user is not None:
+        request.state.user = user
+        request.state.email = user.email
+    return user
 
 
 async def require_user(request: Request) -> str:
-    # Browser door: Cloudflare Access JWT (verified email).
-    claims = await _verify_cf_access(request)
-    if claims is not None:
-        request.state.email = claims.get("email")
-        return request.app.state.single_user_id
-    # Machine door: static bearer (MCP tool).
+    user = await current_user(request)
+    if user is None:
+        raise _UNAUTH
+    return user.id
+
+
+async def require_admin(request: Request) -> str:
+    user_id = await require_user(request)
+    user: User = request.state.user
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="admin only")
+    return user_id
+
+
+def set_session_cookie(response, request: Request, user: User) -> None:
     settings = request.app.state.settings
-    expected = settings.sync_bearer
-    token = _extract_bearer(request.headers.get("authorization"))
-    if expected and token and secrets.compare_digest(token, expected):
-        request.state.email = None
-        return request.app.state.single_user_id
-    raise _UNAUTH
+    token = request.app.state.tokens.make_session(user.id, user.session_epoch)
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=settings.session_ttl_seconds,
+        httponly=True,
+        secure=cookie_secure(settings.public_url),
+        samesite="lax",
+        path="/",
+    )
+
+
+def clear_session_cookie(response, request: Request) -> None:
+    settings = request.app.state.settings
+    response.delete_cookie(
+        SESSION_COOKIE,
+        httponly=True,
+        secure=cookie_secure(settings.public_url),
+        samesite="lax",
+        path="/",
+    )

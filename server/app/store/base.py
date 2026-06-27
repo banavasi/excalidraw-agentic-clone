@@ -23,6 +23,18 @@ class BoardNotFound(Exception):
     """Raised when a file push targets a board that does not exist for the user."""
 
 
+class EmailTaken(Exception):
+    """Signup collides with an existing account on a DIFFERENT auth method.
+
+    ``existing_method`` is the method already registered for that email, so the
+    caller can say "sign in with Google / your password" (no silent merge — v1).
+    """
+
+    def __init__(self, existing_method: str) -> None:
+        super().__init__(existing_method)
+        self.existing_method = existing_method
+
+
 class LimitExceeded(Exception):
     """Raised when an aggregate cap (boards-per-user, files-per-board) is hit."""
 
@@ -75,6 +87,31 @@ class PushConflict:
 PushResult = Union[PushAccepted, PushConflict]
 
 
+@dataclass(frozen=True)
+class User:
+    id: str
+    email: str | None
+    password_hash: str | None
+    email_verified: bool
+    role: str
+    disabled: bool
+    display_name: str | None
+    auth_method: str | None  # 'local' | 'google'
+    oauth_sub: str | None
+    session_epoch: int
+    token_nonce: int
+
+
+@dataclass(frozen=True)
+class DeviceGrant:
+    device_code: str
+    user_code: str
+    user_id: str | None
+    approved: bool
+    consumed: bool
+    expired: bool
+
+
 @runtime_checkable
 class Store(Protocol):
     async def startup(self) -> None: ...
@@ -124,3 +161,77 @@ class Store(Protocol):
     async def reap_tombstones(self, grace_seconds: int) -> int:
         """Permanently drop boards soft-deleted longer than ``grace_seconds`` ago.
         Returns the number reaped. Runs at startup (spec §3)."""
+
+    # --- Phase 7: accounts -----------------------------------------------------
+
+    async def create_local_user(
+        self, email: str, password_hash: str, display_name: str | None
+    ) -> User:
+        """Create an unverified email+password account. Raises EmailTaken if the
+        email already exists (with its existing auth method)."""
+
+    async def upsert_google_user(
+        self, email: str, sub: str, display_name: str | None
+    ) -> User:
+        """Return the existing google account for ``email`` (logging in), or create
+        a verified one. Raises EmailTaken('local') if the email is a password
+        account — no silent merge (v1)."""
+
+    async def get_user_by_id(self, user_id: str) -> User | None: ...
+
+    async def get_user_by_email(self, email: str) -> User | None: ...
+
+    async def set_email_verified(self, user_id: str) -> None: ...
+
+    async def set_password(self, user_id: str, password_hash: str) -> None:
+        """Set a new password AND bump session_epoch + token_nonce (kills existing
+        sessions and outstanding verify/reset links)."""
+
+    async def bump_token_nonce(self, user_id: str) -> None: ...
+
+    async def set_role(self, user_id: str, role: str) -> None: ...
+
+    async def set_disabled(self, user_id: str, disabled: bool) -> None:
+        """Disable/enable; disabling bumps session_epoch (kicks the user)."""
+
+    async def delete_user(self, user_id: str) -> bool: ...
+
+    async def list_users(self) -> list[tuple[User, int]]:
+        """All users with their (non-deleted) board count, for the admin panel."""
+
+    async def grant_admin_by_email(self, email: str) -> bool:
+        """Promote an existing account to admin (admin seeding). False if absent."""
+
+    async def count_admins(self) -> int: ...
+
+    async def adopt_legacy_single_user(self, email: str) -> User | None:
+        """One-shot migration: if a legacy ``external_sub='single-user'`` row exists
+        with no email and ``email`` is free, attach it to that admin email
+        (keeping its boards). Returns the adopted user or None."""
+
+    # --- Phase 8: per-user API tokens + device grant ---------------------------
+
+    async def create_api_token(
+        self, user_id: str, token_hash: str, name: str | None
+    ) -> None: ...
+
+    async def user_id_for_token(self, token_hash: str) -> str | None:
+        """Resolve a (non-revoked) API token hash to its user_id; touches
+        last_used_at. None if unknown/revoked."""
+
+    async def create_device_grant(
+        self, device_code: str, user_code: str, expires_at_ms: int
+    ) -> None: ...
+
+    async def get_device_grant_by_user_code(self, user_code: str) -> DeviceGrant | None:
+        ...
+
+    async def approve_device_grant(self, user_code: str, user_id: str) -> bool:
+        """Mark the grant approved + attach the approving user. False if unknown
+        or expired."""
+
+    async def get_device_grant(self, device_code: str) -> DeviceGrant | None: ...
+
+    async def consume_device_grant(self, device_code: str) -> str | None:
+        """If approved & unconsumed & unexpired, mark consumed and return the
+        approving user_id (so a token is minted exactly once). Else None."""
