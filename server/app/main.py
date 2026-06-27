@@ -15,9 +15,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
 from .api import build_router
+from .api.admin_routes import build_admin_router
+from .api.auth_routes import build_auth_router
+from .api.oauth_device import build_device_router
 from .config import SINGLE_USER_SUB, Settings
 from .limits import BodySizeLimitMiddleware
 from .observability import instrument_app, tracer
+from .ratelimit import RateLimiter
+from .security import TokenService, cookie_secure
 from .store.base import Store
 
 log = logging.getLogger("excaliboard")
@@ -44,7 +49,15 @@ def create_app(store: Store | None = None, settings: Settings | None = None) -> 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await store.startup()
+        # The legacy single-user account is preserved so the existing static
+        # bearer / MCP tool keeps working through the Phase 8 transition.
         app.state.single_user_id = await store.ensure_user(SINGLE_USER_SUB)
+        if settings.admin_email:
+            # Adopt the legacy single-user row onto the admin email (keeps the
+            # operator's existing boards), or promote an already-signed-up account.
+            adopted = await store.adopt_legacy_single_user(settings.admin_email)
+            if adopted is None:
+                await store.grant_admin_by_email(settings.admin_email)
         try:
             reaped = await store.reap_tombstones(settings.tombstone_grace_seconds)
             if reaped:
@@ -65,15 +78,25 @@ def create_app(store: Store | None = None, settings: Settings | None = None) -> 
     # State the request handlers read. (single_user_id is filled in at startup.)
     app.state.settings = settings
     app.state.store = store
+    # Phase 7 auth wiring. tokens=None disables the cookie door (bearer-only;
+    # tests that don't exercise auth).
+    app.state.tokens = TokenService(settings.secret_key) if settings.secret_key else None
+    app.state.ratelimit = RateLimiter()
 
-    # Cloudflare Access JWT verifier (the browser door). None => bearer-only door.
-    app.state.cf_jwks_client = None
-    if settings.cf_access_team_domain and settings.cf_access_aud:
-        from jwt import PyJWKClient
+    # Google OAuth (optional). app.state.oauth=None => the /auth/google/* routes 404.
+    app.state.oauth = None
+    if settings.google_client_id and settings.google_client_secret:
+        from authlib.integrations.starlette_client import OAuth
 
-        app.state.cf_jwks_client = PyJWKClient(
-            f"https://{settings.cf_access_team_domain}/cdn-cgi/access/certs"
+        oauth = OAuth()
+        oauth.register(
+            name="google",
+            client_id=settings.google_client_id,
+            client_secret=settings.google_client_secret,
+            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+            client_kwargs={"scope": "openid email profile"},
         )
+        app.state.oauth = oauth
 
     # Body-limit runs just inside CORS (added first => inner), so it still rejects
     # oversized bodies before routing/buffering while CORS decorates the 413.
@@ -81,13 +104,27 @@ def create_app(store: Store | None = None, settings: Settings | None = None) -> 
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=False,
-        allow_methods=["GET", "PUT", "DELETE", "OPTIONS"],
+        allow_credentials=True,  # session cookie flows; Starlette echoes the origin
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
     )
+    # SessionMiddleware backs authlib's OAuth state (CSRF). Outermost so it wraps
+    # the OAuth routes. Only meaningful when a secret_key is configured.
+    if settings.secret_key:
+        from starlette.middleware.sessions import SessionMiddleware
+
+        app.add_middleware(
+            SessionMiddleware,
+            secret_key=settings.secret_key,
+            https_only=cookie_secure(settings.public_url),
+            same_site="lax",
+        )
 
     instrument_app(app)
     app.include_router(build_router())
+    app.include_router(build_auth_router())
+    app.include_router(build_admin_router())
+    app.include_router(build_device_router())
     return app
 
 

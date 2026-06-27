@@ -21,6 +21,27 @@ export default defineConfig(({ mode }) => {
       port: Number(envVars.VITE_APP_PORT || 3000),
       // open the browser
       open: true,
+      // Dev: proxy the API paths to the FastAPI server so the app + API are
+      // same-origin (the session cookie is SameSite=Lax — cross-port fetch
+      // wouldn't carry it otherwise). Override the target with VITE_APP_API_TARGET.
+      proxy: {
+        "/auth": {
+          target: envVars.VITE_APP_API_TARGET || "http://localhost:8789",
+          changeOrigin: true,
+        },
+        "/sync": {
+          target: envVars.VITE_APP_API_TARGET || "http://localhost:8789",
+          changeOrigin: true,
+        },
+        "/oauth": {
+          target: envVars.VITE_APP_API_TARGET || "http://localhost:8789",
+          changeOrigin: true,
+        },
+        "/admin": {
+          target: envVars.VITE_APP_API_TARGET || "http://localhost:8789",
+          changeOrigin: true,
+        },
+      },
     },
     // We need to specify the envDir since now there are no
     //more located in parallel with the vite.config.ts file but in parent dir
@@ -227,10 +248,10 @@ export default defineConfig(({ mode }) => {
           maximumFileSizeToCacheInBytes: 2.3 * 1024 ** 2, // 2.3MB
         },
         manifest: {
-          short_name: "Excalidraw",
-          name: "Excalidraw",
+          short_name: "Excaliboard",
+          name: "Excaliboard",
           description:
-            "Excalidraw is a whiteboard tool that lets you easily sketch diagrams that have a hand-drawn feel to them.",
+            "A self-hostable, multi-user whiteboard — Excalidraw with accounts, cloud sync, and AI.",
           icons: [
             {
               src: "android-chrome-192x192.png",

@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Excalidraw Whiteboard</title>
+    <title>Excaliboard</title>
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, shrink-to-fit=no"
@@ -14,26 +14,26 @@
     <!-- Primary Meta Tags -->
     <meta
       name="title"
-      content="Free, collaborative whiteboard • Hand-drawn look & feel | Excalidraw"
+      content="Excaliboard — self-hostable collaborative whiteboard with AI"
     />
     <meta
       name="description"
-      content="Excalidraw is a virtual collaborative whiteboard tool that lets you easily sketch diagrams that have a hand-drawn feel to them."
+      content="Excaliboard is a self-hostable, multi-user whiteboard — Excalidraw with accounts, cloud sync, and AI."
     />
     <meta name="image" content="https://excalidraw.com/og-image-3.png" />
 
     <!-- Open Graph / Facebook -->
-    <meta property="og:site_name" content="Excalidraw" />
+    <meta property="og:site_name" content="Excaliboard" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://excalidraw.com" />
     <meta
       property="og:title"
-      content="Excalidraw — Collaborative whiteboarding made easy"
+      content="Excaliboard — your whiteboard, on every device"
     />
-    <meta property="og:image:alt" content="Excalidraw logo" />
+    <meta property="og:image:alt" content="Excaliboard logo" />
     <meta
       property="og:description"
-      content="Excalidraw is a virtual collaborative whiteboard tool that lets you easily sketch diagrams that have a hand-drawn feel to them."
+      content="Excaliboard is a self-hostable, multi-user whiteboard — Excalidraw with accounts, cloud sync, and AI."
     />
     <meta property="og:image" content="https://excalidraw.com/og-image-3.png" />
 
@@ -43,11 +43,11 @@
     <meta property="twitter:url" content="https://excalidraw.com" />
     <meta
       property="twitter:title"
-      content="Excalidraw — Collaborative whiteboarding made easy"
+      content="Excaliboard — your whiteboard, on every device"
     />
     <meta
       property="twitter:description"
-      content="Excalidraw is a virtual collaborative whiteboard tool that lets you easily sketch diagrams that have a hand-drawn feel to them."
+      content="Excaliboard is a self-hostable, multi-user whiteboard — Excalidraw with accounts, cloud sync, and AI."
     />
     <meta
       property="twitter:image"
@@ -99,8 +99,8 @@
     <% } %>
 
     <!------------------------------------------------------------------------->
-    <% if (typeof PROD != 'undefined' && PROD == true) { %>
-    <% if (typeof VITE_APP_SELFHOST == 'undefined' || !VITE_APP_SELFHOST) { %>
+    <% if (typeof PROD != 'undefined' && PROD == true) { %> <% if (typeof
+    VITE_APP_SELFHOST == 'undefined' || !VITE_APP_SELFHOST) { %>
     <script>
       // Redirect Excalidraw+ users which have auto-redirect enabled.
       //
@@ -214,11 +214,12 @@
   <body>
     <noscript> You need to enable JavaScript to run this app. </noscript>
     <header>
-      <h1 class="visually-hidden">Excalidraw</h1>
+      <h1 class="visually-hidden">Excaliboard</h1>
     </header>
     <div id="root"></div>
     <script type="module" src="index.tsx"></script>
-    <% if (typeof PROD != 'undefined' && PROD == true && (typeof VITE_APP_SELFHOST == 'undefined' || !VITE_APP_SELFHOST)) { %>
+    <% if (typeof PROD != 'undefined' && PROD == true && (typeof
+    VITE_APP_SELFHOST == 'undefined' || !VITE_APP_SELFHOST)) { %>
     <!-- 100% privacy friendly analytics -->
     <script>
       // need to load this script dynamically bcs. of iframe embed tracking

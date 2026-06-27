@@ -28,12 +28,46 @@ class Settings(BaseSettings):
     # browser cookie). Empty => the bearer door is closed.
     sync_bearer: str = ""
 
-    # Cloudflare Access (the BROWSER door): verify the signed JWT Access injects as
-    # `Cf-Access-Jwt-Assertion`. team_domain => issuer `https://<team_domain>` and
-    # JWKS `https://<team_domain>/cdn-cgi/access/certs`; aud is the Access app's AUD
-    # tag. BOTH empty => the JWT door is disabled (bearer-only; tests/local dev).
+    # Cloudflare Access (optional network gate, NOT the identity source as of
+    # Phase 7): if both set, a verified Access JWT is honored as a browser door.
+    # Empty => disabled (the default OSS/self-host path).
     cf_access_team_domain: str = ""
     cf_access_aud: str = ""
+
+    # --- Phase 7: multi-user in-app auth ---------------------------------------
+    # Signs the session cookie AND the verify/reset email tokens. REQUIRED once
+    # auth is used; generate with `openssl rand -hex 32`. Empty => auth disabled.
+    secret_key: str = ""
+    # Public base URL of the app (used in email links + to decide cookie Secure).
+    # e.g. https://app.example.com  (http://localhost:3000 in dev).
+    public_url: str = "http://localhost:3000"
+    # Session cookie lifetime.
+    session_ttl_seconds: int = 14 * 24 * 3600
+    # Verify/reset email token TTLs.
+    verify_ttl_seconds: int = 24 * 3600
+    reset_ttl_seconds: int = 3600
+
+    # SMTP for verification/reset email. If smtp_host is empty, links are LOGGED
+    # to stdout so a fresh self-host can bootstrap with no mail server.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_pass: str = ""
+    smtp_from: str = "Excaliboard <no-reply@localhost>"
+    smtp_starttls: bool = True
+
+    # Google OAuth (optional). Both empty => the Google button is hidden and the
+    # /auth/google/* routes 404.
+    google_client_id: str = ""
+    google_client_secret: str = ""
+
+    # The email granted role=admin on first verify/sign-in, and the identity the
+    # legacy static bearer (SYNC_BEARER) maps to during the Phase 8 transition.
+    admin_email: str = ""
+
+    # OAuth 2.0 device-authorization grant (Phase 8: per-user MCP).
+    device_code_ttl_seconds: int = 600
+    device_poll_interval_seconds: int = 5
 
     # Hard cap on a single decoded scene ciphertext (anti-DoS). Default 25 MiB.
     max_ciphertext_bytes: int = 25 * 1024 * 1024
