@@ -8,7 +8,9 @@ import { s } from "./authStyles";
  * guarantees it), so approving links the polling agent (local Claude/Codex) to
  * THIS account.
  */
-export const DeviceApprovePage: React.FC<{ email?: string | null }> = ({ email }) => {
+export const DeviceApprovePage: React.FC<{ email?: string | null }> = ({
+  email,
+}) => {
   const [code, setCode] = useState(
     new URLSearchParams(window.location.search).get("code") || "",
   );
@@ -41,8 +43,8 @@ export const DeviceApprovePage: React.FC<{ email?: string | null }> = ({ email }
         {done ? (
           <>
             <div style={s.notice}>
-              Approved! Your terminal agent is now connected to this account. You
-              can close this tab.
+              Approved! Your terminal agent is now connected to this account.
+              You can close this tab.
             </div>
             <button
               type="button"
@@ -55,19 +57,28 @@ export const DeviceApprovePage: React.FC<{ email?: string | null }> = ({ email }
         ) : (
           <>
             <div style={s.sub}>
-              {email ? `Signed in as ${email}. ` : ""}A local agent wants to act on
-              your boards. Confirm the code it showed you.
+              {email ? `Signed in as ${email}. ` : ""}A local agent wants to act
+              on your boards. Confirm the code it showed you.
             </div>
             <label style={s.label}>Device code</label>
             <input
-              style={{ ...s.input, letterSpacing: "0.2em", textAlign: "center", fontSize: 18 }}
+              style={{
+                ...s.input,
+                letterSpacing: "0.2em",
+                textAlign: "center",
+                fontSize: 18,
+              }}
               value={code}
               onChange={(e) => setCode(e.target.value)}
               placeholder="XXXX-XXXX"
               autoFocus
             />
             {error && <div style={s.error}>{error}</div>}
-            <button type="submit" style={s.primary} disabled={busy || !code.trim()}>
+            <button
+              type="submit"
+              style={s.primary}
+              disabled={busy || !code.trim()}
+            >
               {busy ? "…" : "Approve device"}
             </button>
           </>

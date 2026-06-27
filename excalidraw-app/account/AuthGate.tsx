@@ -93,7 +93,9 @@ export const AuthGate: React.FC = () => {
   if (!boardsReady) {
     return (
       <div style={{ ...s.page, background: "#f7f7fb" }}>
-        <div style={{ color: "#9ca3af", fontSize: 14 }}>Loading your boards…</div>
+        <div style={{ color: "#9ca3af", fontSize: 14 }}>
+          Loading your boards…
+        </div>
       </div>
     );
   }

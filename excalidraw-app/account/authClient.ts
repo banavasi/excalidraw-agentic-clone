@@ -62,7 +62,8 @@ export const signup = (email: string, password: string, name?: string) =>
 export const resendVerification = (email: string) =>
   post("/auth/resend", { email });
 
-export const forgotPassword = (email: string) => post("/auth/forgot", { email });
+export const forgotPassword = (email: string) =>
+  post("/auth/forgot", { email });
 
 export const resetPassword = (token: string, password: string) =>
   post("/auth/reset", { token, password });

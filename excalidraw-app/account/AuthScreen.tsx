@@ -13,10 +13,10 @@ import { s } from "./authStyles";
 type Mode = "login" | "signup" | "forgot";
 
 /** Full-screen login / signup / forgot card shown when not authenticated. */
-export const AuthScreen: React.FC<{ initialMode?: Mode; onSignedIn: () => void }> = ({
-  initialMode = "login",
-  onSignedIn,
-}) => {
+export const AuthScreen: React.FC<{
+  initialMode?: Mode;
+  onSignedIn: () => void;
+}> = ({ initialMode = "login", onSignedIn }) => {
   const [mode, setMode] = useState<Mode>(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -144,7 +144,9 @@ export const AuthScreen: React.FC<{ initialMode?: Mode; onSignedIn: () => void }
               minLength={mode === "signup" ? 8 : undefined}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              autoComplete={mode === "signup" ? "new-password" : "current-password"}
+              autoComplete={
+                mode === "signup" ? "new-password" : "current-password"
+              }
             />
           </>
         )}

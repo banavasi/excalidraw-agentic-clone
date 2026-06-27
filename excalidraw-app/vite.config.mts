@@ -25,10 +25,22 @@ export default defineConfig(({ mode }) => {
       // same-origin (the session cookie is SameSite=Lax — cross-port fetch
       // wouldn't carry it otherwise). Override the target with VITE_APP_API_TARGET.
       proxy: {
-        "/auth": { target: envVars.VITE_APP_API_TARGET || "http://localhost:8789", changeOrigin: true },
-        "/sync": { target: envVars.VITE_APP_API_TARGET || "http://localhost:8789", changeOrigin: true },
-        "/oauth": { target: envVars.VITE_APP_API_TARGET || "http://localhost:8789", changeOrigin: true },
-        "/admin": { target: envVars.VITE_APP_API_TARGET || "http://localhost:8789", changeOrigin: true },
+        "/auth": {
+          target: envVars.VITE_APP_API_TARGET || "http://localhost:8789",
+          changeOrigin: true,
+        },
+        "/sync": {
+          target: envVars.VITE_APP_API_TARGET || "http://localhost:8789",
+          changeOrigin: true,
+        },
+        "/oauth": {
+          target: envVars.VITE_APP_API_TARGET || "http://localhost:8789",
+          changeOrigin: true,
+        },
+        "/admin": {
+          target: envVars.VITE_APP_API_TARGET || "http://localhost:8789",
+          changeOrigin: true,
+        },
       },
     },
     // We need to specify the envDir since now there are no

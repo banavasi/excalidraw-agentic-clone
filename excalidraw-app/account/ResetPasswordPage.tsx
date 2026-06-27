@@ -58,7 +58,9 @@ export const ResetPasswordPage: React.FC = () => {
               autoComplete="new-password"
             />
             {!token && (
-              <div style={s.error}>This link is missing its token. Request a new one.</div>
+              <div style={s.error}>
+                This link is missing its token. Request a new one.
+              </div>
             )}
             {error && <div style={s.error}>{error}</div>}
             <button type="submit" style={s.primary} disabled={busy || !token}>

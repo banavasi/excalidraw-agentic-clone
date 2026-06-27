@@ -46,7 +46,10 @@ const deleteDb = (name: string): Promise<void> =>
 export const resetLocalBoardState = async (): Promise<void> => {
   try {
     for (const key of Object.keys(localStorage)) {
-      if (BOARD_KEYS.has(key) || key.startsWith(STORAGE_KEYS.VERSION_DATA_STATE)) {
+      if (
+        BOARD_KEYS.has(key) ||
+        key.startsWith(STORAGE_KEYS.VERSION_DATA_STATE)
+      ) {
         localStorage.removeItem(key);
       }
     }
