@@ -113,7 +113,7 @@ def build_auth_router() -> APIRouter:
         await store.bump_token_nonce(user.id)  # single-use
         await _maybe_grant_admin(request, user)
         fresh = await store.get_user_by_id(user.id)
-        resp = RedirectResponse(_public(request, "/?verified=1"), 303)
+        resp = RedirectResponse(_public(request, "/boards?verified=1"), 303)
         set_session_cookie(resp, request, fresh)  # auto-login
         return resp
 
@@ -216,7 +216,7 @@ def build_auth_router() -> APIRouter:
             return RedirectResponse(_public(request, "/login?error=use_password"), 303)
         await _maybe_grant_admin(request, user)
         fresh = await store.get_user_by_id(user.id)
-        resp = RedirectResponse(_public(request, "/"), 303)
+        resp = RedirectResponse(_public(request, "/boards"), 303)
         set_session_cookie(resp, request, fresh)
         return resp
 

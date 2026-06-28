@@ -5,6 +5,7 @@ import ExcalidrawApp from "../App";
 import { AdminPage } from "./AdminPage";
 import { getMe } from "./authClient";
 import { AuthScreen } from "./AuthScreen";
+import { BoardsDashboard } from "./BoardsDashboard";
 import {
   getBoardOwner,
   resetLocalBoardState,
@@ -68,14 +69,14 @@ export const AuthGate: React.FC = () => {
     return (
       <AuthScreen
         initialMode={path === "/signup" ? "signup" : "login"}
-        onSignedIn={() => window.location.assign("/")}
+        onSignedIn={() => window.location.assign("/boards")}
       />
     );
   }
 
-  // Authenticated but parked on an auth URL -> send to the editor.
+  // Authenticated but parked on an auth URL -> send to the boards dashboard.
   if (path === "/login" || path === "/signup") {
-    window.location.assign("/");
+    window.location.assign("/boards");
     return null;
   }
 
@@ -88,8 +89,8 @@ export const AuthGate: React.FC = () => {
     return <AdminPage email={me.email} />;
   }
 
-  // Editor: wait for the account-switch board reset to finish so App.tsx's
-  // synchronous workboards bootstrap never runs against a stale board space.
+  // Board-backed pages (dashboard + editor) wait for the account-switch reset so
+  // they never read a stale board space.
   if (!boardsReady) {
     return (
       <div style={{ ...s.page, background: "#f7f7fb" }}>
@@ -98,6 +99,10 @@ export const AuthGate: React.FC = () => {
         </div>
       </div>
     );
+  }
+
+  if (path === "/boards") {
+    return <BoardsDashboard email={me.email} />;
   }
 
   return <ExcalidrawApp />;
