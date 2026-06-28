@@ -13,9 +13,14 @@ import {
 } from "./boardReset";
 import { DeviceApprovePage } from "./DeviceApprovePage";
 import { ResetPasswordPage } from "./ResetPasswordPage";
-import { s } from "./authStyles";
 
 import type { Me } from "./authClient";
+
+const Splash: React.FC<{ label: string }> = ({ label }) => (
+  <div className="eb-page eb-page--center">
+    <div className="eb-muted">{label}</div>
+  </div>
+);
 
 /**
  * Auth gate (the app has no router). Path-based:
@@ -58,11 +63,7 @@ export const AuthGate: React.FC = () => {
   }
 
   if (me === null) {
-    return (
-      <div style={{ ...s.page, background: "#f7f7fb" }}>
-        <div style={{ color: "#9ca3af", fontSize: 14 }}>Loading…</div>
-      </div>
-    );
+    return <Splash label="Loading…" />;
   }
 
   if (!me.authenticated) {
@@ -92,13 +93,7 @@ export const AuthGate: React.FC = () => {
   // Board-backed pages (dashboard + editor) wait for the account-switch reset so
   // they never read a stale board space.
   if (!boardsReady) {
-    return (
-      <div style={{ ...s.page, background: "#f7f7fb" }}>
-        <div style={{ color: "#9ca3af", fontSize: 14 }}>
-          Loading your boards…
-        </div>
-      </div>
-    );
+    return <Splash label="Loading your boards…" />;
   }
 
   if (path === "/boards") {

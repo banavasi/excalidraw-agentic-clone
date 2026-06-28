@@ -9,6 +9,9 @@ import type { SyncConfig } from "../data/excaliboardSync";
  * Cloud-sync settings (Phase 7): identity is your in-app account (the session
  * cookie), E2E is dropped, so there's nothing to paste — just an on/off toggle,
  * a read-out of who you're signed in as (GET /sync/whoami), and a sign-out.
+ *
+ * Rendered INSIDE the editor, so it stays theme-aware (Excalidraw CSS vars) while
+ * borrowing the shared radii/shadow/motion tokens from account.scss.
  */
 export const SyncSettingsDialog: React.FC<{
   onClose: () => void;
@@ -21,7 +24,6 @@ export const SyncSettingsDialog: React.FC<{
 
   useEffect(() => {
     let cancelled = false;
-    // Same-origin (relative): rides the Cloudflare Access cookie, no CORS.
     fetch("/sync/whoami")
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
@@ -42,8 +44,7 @@ export const SyncSettingsDialog: React.FC<{
   }, []);
 
   const save = () => {
-    const config: SyncConfig = { enabled };
-    setSyncConfig(config);
+    setSyncConfig({ enabled } as SyncConfig);
     onSaved();
     onClose();
   };
@@ -69,7 +70,7 @@ export const SyncSettingsDialog: React.FC<{
           ) : identity ? (
             <>
               <span style={styles.muted}>Signed in as</span>
-              <strong>{identity}</strong>
+              <strong style={{ fontSize: 14 }}>{identity}</strong>
             </>
           ) : (
             <span style={styles.muted}>Signed in.</span>
@@ -95,7 +96,11 @@ export const SyncSettingsDialog: React.FC<{
               await logout();
               window.location.assign("/");
             }}
-            style={{ ...styles.button, marginRight: "auto", color: "#b42318" }}
+            style={{
+              ...styles.button,
+              marginRight: "auto",
+              color: "var(--eb-danger, #c5362c)",
+            }}
           >
             Sign out
           </button>
@@ -119,53 +124,61 @@ const styles: Record<string, React.CSSProperties> = {
   overlay: {
     position: "fixed",
     inset: 0,
-    background: "rgba(0,0,0,0.4)",
+    background: "rgba(20,18,45,0.42)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    zIndex: 1000,
+    zIndex: 2000,
+    animation: "eb-fade 0.18s var(--eb-ease, ease)",
   },
   panel: {
     background: "var(--island-bg-color, #fff)",
-    color: "var(--text-primary-color, #1b1b1f)",
+    color: "var(--text-primary-color, #1a1a22)",
     width: "min(440px, 92vw)",
-    borderRadius: 8,
+    borderRadius: "var(--eb-r-lg, 16px)",
     padding: 24,
-    boxShadow: "0 10px 40px rgba(0,0,0,0.25)",
+    boxShadow: "var(--eb-shadow-lg, 0 20px 54px rgba(26,23,80,0.16))",
     fontSize: 14,
+    animation: "eb-pop 0.22s var(--eb-ease, ease)",
   },
-  title: { margin: "0 0 8px" },
-  hint: { margin: "0 0 16px", fontSize: 13, opacity: 0.8, lineHeight: 1.5 },
+  title: {
+    margin: "0 0 8px",
+    fontSize: 18,
+    fontWeight: 700,
+    letterSpacing: "-0.01em",
+  },
+  hint: { margin: "0 0 16px", fontSize: 13, opacity: 0.78, lineHeight: 1.5 },
   identity: {
     display: "flex",
     flexDirection: "column",
-    gap: 2,
+    gap: 3,
     padding: "12px 14px",
-    marginBottom: 16,
-    borderRadius: 6,
-    background: "var(--input-bg-color, #f5f5f7)",
-    border: "1px solid var(--default-border-color, #ced4da)",
-    fontSize: 14,
+    marginBottom: 18,
+    borderRadius: "var(--eb-r-sm, 8px)",
+    background: "var(--input-bg-color, #f3f4f8)",
+    border: "1px solid var(--default-border-color, #e7e7f0)",
   },
-  muted: { fontSize: 12, opacity: 0.65 },
+  muted: { fontSize: 12, opacity: 0.7 },
   checkboxRow: {
     display: "flex",
     alignItems: "center",
-    gap: 8,
-    marginBottom: 20,
+    gap: 9,
+    marginBottom: 22,
+    cursor: "pointer",
   },
   actions: { display: "flex", justifyContent: "flex-end", gap: 8 },
   button: {
-    padding: "8px 16px",
-    borderRadius: 6,
-    border: "1px solid var(--default-border-color, #ced4da)",
+    padding: "9px 16px",
+    borderRadius: "var(--eb-r-md, 12px)",
+    border: "1px solid var(--default-border-color, #d6d6e3)",
     background: "var(--island-bg-color, #fff)",
     color: "inherit",
+    fontWeight: 600,
     cursor: "pointer",
   },
   primary: {
     background: "var(--color-primary, #6965db)",
-    borderColor: "var(--color-primary, #6965db)",
+    borderColor: "transparent",
     color: "#fff",
   },
 };
