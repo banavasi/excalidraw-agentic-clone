@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 
 import { approveDevice } from "./authClient";
-import { s } from "./authStyles";
 
 /**
  * Device-flow approval (/device?code=…). The user is already signed in (the gate
@@ -37,18 +36,19 @@ export const DeviceApprovePage: React.FC<{ email?: string | null }> = ({
   };
 
   return (
-    <div style={s.page}>
-      <form style={s.card} onSubmit={approve}>
-        <div style={s.brand}>Connect a device</div>
+    <div className="eb-page eb-page--center">
+      <form className="eb-card eb-rise" onSubmit={approve}>
+        <div className="eb-brand">Connect a device</div>
         {done ? (
           <>
-            <div style={s.notice}>
+            <div className="eb-note eb-note--ok">
               Approved! Your terminal agent is now connected to this account.
               You can close this tab.
             </div>
             <button
               type="button"
-              style={s.primary}
+              className="eb-btn eb-btn--primary eb-btn--block"
+              style={{ marginTop: 18 }}
               onClick={() => window.location.assign("/")}
             >
               Back to Excaliboard
@@ -56,27 +56,29 @@ export const DeviceApprovePage: React.FC<{ email?: string | null }> = ({
           </>
         ) : (
           <>
-            <div style={s.sub}>
+            <div className="eb-sub">
               {email ? `Signed in as ${email}. ` : ""}A local agent wants to act
               on your boards. Confirm the code it showed you.
             </div>
-            <label style={s.label}>Device code</label>
+            <label className="eb-label">Device code</label>
             <input
+              className="eb-input"
               style={{
-                ...s.input,
-                letterSpacing: "0.2em",
+                letterSpacing: "0.22em",
                 textAlign: "center",
-                fontSize: 18,
+                fontSize: 19,
+                fontWeight: 600,
               }}
               value={code}
               onChange={(e) => setCode(e.target.value)}
               placeholder="XXXX-XXXX"
               autoFocus
             />
-            {error && <div style={s.error}>{error}</div>}
+            {error && <div className="eb-note eb-note--error">{error}</div>}
             <button
               type="submit"
-              style={s.primary}
+              className="eb-btn eb-btn--primary eb-btn--block"
+              style={{ marginTop: 22 }}
               disabled={busy || !code.trim()}
             >
               {busy ? "…" : "Approve device"}

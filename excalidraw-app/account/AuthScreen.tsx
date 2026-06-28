@@ -8,7 +8,6 @@ import {
   resendVerification,
   signup,
 } from "./authClient";
-import { s } from "./authStyles";
 
 type Mode = "login" | "signup" | "forgot";
 
@@ -81,17 +80,26 @@ export const AuthScreen: React.FC<{
     setNotice("Confirmation email re-sent. Check your inbox.");
   };
 
+  const cta =
+    mode === "login"
+      ? "Sign in"
+      : mode === "signup"
+      ? "Create account"
+      : "Send reset link";
+
   return (
-    <div style={s.page}>
-      <form style={s.card} onSubmit={submit}>
-        <div style={s.brand}>Excaliboard</div>
-        <div style={s.sub}>Your boards, on every device. Draw with AI.</div>
+    <div className="eb-page eb-page--center">
+      <form className="eb-card eb-rise" onSubmit={submit}>
+        <div className="eb-brand">Excaliboard</div>
+        <div className="eb-sub">
+          Your boards, on every device. Draw with AI.
+        </div>
 
         {mode !== "forgot" && (
-          <div style={s.tabs}>
+          <div className="eb-tabs" role="tablist">
             <button
               type="button"
-              style={{ ...s.tab, ...(mode === "login" ? s.tabActive : {}) }}
+              className={`eb-tab ${mode === "login" ? "is-active" : ""}`}
               onClick={() => {
                 reset();
                 setMode("login");
@@ -101,7 +109,7 @@ export const AuthScreen: React.FC<{
             </button>
             <button
               type="button"
-              style={{ ...s.tab, ...(mode === "signup" ? s.tabActive : {}) }}
+              className={`eb-tab ${mode === "signup" ? "is-active" : ""}`}
               onClick={() => {
                 reset();
                 setMode("signup");
@@ -114,9 +122,9 @@ export const AuthScreen: React.FC<{
 
         {mode === "signup" && (
           <>
-            <label style={s.label}>Name (optional)</label>
+            <label className="eb-label">Name (optional)</label>
             <input
-              style={s.input}
+              className="eb-input"
               value={name}
               onChange={(e) => setName(e.target.value)}
               autoComplete="name"
@@ -124,9 +132,9 @@ export const AuthScreen: React.FC<{
           </>
         )}
 
-        <label style={s.label}>Email</label>
+        <label className="eb-label">Email</label>
         <input
-          style={s.input}
+          className="eb-input"
           type="email"
           required
           value={email}
@@ -136,9 +144,9 @@ export const AuthScreen: React.FC<{
 
         {mode !== "forgot" && (
           <>
-            <label style={s.label}>Password</label>
+            <label className="eb-label">Password</label>
             <input
-              style={s.input}
+              className="eb-input"
               type="password"
               required
               minLength={mode === "signup" ? 8 : undefined}
@@ -151,35 +159,34 @@ export const AuthScreen: React.FC<{
           </>
         )}
 
-        {error && <div style={s.error}>{error}</div>}
-        {notice && <div style={s.notice}>{notice}</div>}
+        {error && <div className="eb-note eb-note--error">{error}</div>}
+        {notice && <div className="eb-note eb-note--ok">{notice}</div>}
         {unverified && (
-          <div style={s.linkRow}>
-            <button type="button" style={s.link} onClick={doResend}>
+          <div className="eb-foot">
+            <button type="button" className="eb-link" onClick={doResend}>
               Resend confirmation email
             </button>
           </div>
         )}
 
-        <button type="submit" style={s.primary} disabled={busy}>
-          {busy
-            ? "…"
-            : mode === "login"
-            ? "Sign in"
-            : mode === "signup"
-            ? "Create account"
-            : "Send reset link"}
+        <button
+          type="submit"
+          className="eb-btn eb-btn--primary eb-btn--block"
+          style={{ marginTop: 22 }}
+          disabled={busy}
+        >
+          {busy ? "…" : cta}
         </button>
 
         {mode !== "forgot" && google && (
           <>
-            <div style={s.divider}>
-              <hr style={s.hr} />
-              or
-              <hr style={s.hr} />
-            </div>
+            <div className="eb-divider">or</div>
             <a href={googleLoginUrl()} style={{ textDecoration: "none" }}>
-              <button type="button" style={s.ghost}>
+              <button
+                type="button"
+                className="eb-btn eb-btn--ghost eb-btn--block"
+                style={{ marginTop: 10 }}
+              >
                 <GoogleIcon />
                 Continue with Google
               </button>
@@ -187,11 +194,11 @@ export const AuthScreen: React.FC<{
           </>
         )}
 
-        <div style={s.linkRow}>
+        <div className="eb-foot">
           {mode === "login" && (
             <button
               type="button"
-              style={s.link}
+              className="eb-link"
               onClick={() => {
                 reset();
                 setMode("forgot");
@@ -203,7 +210,7 @@ export const AuthScreen: React.FC<{
           {mode === "forgot" && (
             <button
               type="button"
-              style={s.link}
+              className="eb-link"
               onClick={() => {
                 reset();
                 setMode("login");

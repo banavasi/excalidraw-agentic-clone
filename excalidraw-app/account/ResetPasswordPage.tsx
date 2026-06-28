@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 
 import { resetPassword } from "./authClient";
-import { s } from "./authStyles";
 
 /** Public page reached from the password-reset email link (/reset?token=…). */
 export const ResetPasswordPage: React.FC = () => {
@@ -30,15 +29,18 @@ export const ResetPasswordPage: React.FC = () => {
   };
 
   return (
-    <div style={s.page}>
-      <form style={s.card} onSubmit={submit}>
-        <div style={s.brand}>Set a new password</div>
+    <div className="eb-page eb-page--center">
+      <form className="eb-card eb-rise" onSubmit={submit}>
+        <div className="eb-brand">Set a new password</div>
         {done ? (
           <>
-            <div style={s.notice}>Your password has been updated.</div>
+            <div className="eb-note eb-note--ok">
+              Your password has been updated.
+            </div>
             <button
               type="button"
-              style={s.primary}
+              className="eb-btn eb-btn--primary eb-btn--block"
+              style={{ marginTop: 18 }}
               onClick={() => window.location.assign("/")}
             >
               Go to sign in
@@ -46,10 +48,12 @@ export const ResetPasswordPage: React.FC = () => {
           </>
         ) : (
           <>
-            <div style={s.sub}>Choose a new password for your account.</div>
-            <label style={s.label}>New password</label>
+            <div className="eb-sub">
+              Choose a new password for your account.
+            </div>
+            <label className="eb-label">New password</label>
             <input
-              style={s.input}
+              className="eb-input"
               type="password"
               required
               minLength={8}
@@ -58,12 +62,17 @@ export const ResetPasswordPage: React.FC = () => {
               autoComplete="new-password"
             />
             {!token && (
-              <div style={s.error}>
+              <div className="eb-note eb-note--error">
                 This link is missing its token. Request a new one.
               </div>
             )}
-            {error && <div style={s.error}>{error}</div>}
-            <button type="submit" style={s.primary} disabled={busy || !token}>
+            {error && <div className="eb-note eb-note--error">{error}</div>}
+            <button
+              type="submit"
+              className="eb-btn eb-btn--primary eb-btn--block"
+              style={{ marginTop: 22 }}
+              disabled={busy || !token}
+            >
               {busy ? "…" : "Update password"}
             </button>
           </>

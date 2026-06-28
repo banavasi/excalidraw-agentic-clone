@@ -132,14 +132,17 @@ export const BoardsDashboard: React.FC<{ email?: string | null }> = ({
   };
 
   return (
-    <div style={s.page}>
-      <header style={s.bar}>
-        <div style={s.brand}>Excaliboard</div>
-        <div style={s.barRight}>
-          {email && <span style={s.email}>{email}</span>}
+    <div className="eb-page">
+      <header className="eb-bar">
+        <div className="eb-brand" style={{ fontSize: 17 }}>
+          Excaliboard
+        </div>
+        <div className="eb-bar__right">
+          {email && <span className="eb-bar__email">{email}</span>}
           <button
             type="button"
-            style={s.signout}
+            className="eb-link"
+            style={{ color: "var(--eb-danger)" }}
             onClick={async () => {
               await logout();
               window.location.assign("/");
@@ -150,62 +153,72 @@ export const BoardsDashboard: React.FC<{ email?: string | null }> = ({
         </div>
       </header>
 
-      <div style={s.wrap}>
-        <div style={s.head}>
-          <h1 style={s.title}>Your boards</h1>
-          <button type="button" style={s.newBtn} onClick={onNew}>
+      <div className="eb-wrap">
+        <div className="eb-head">
+          <h1 className="eb-title">Your boards</h1>
+          <button
+            type="button"
+            className="eb-btn eb-btn--primary"
+            onClick={onNew}
+          >
             + New board
           </button>
         </div>
 
         {syncing && boards.length === 0 ? (
-          <div style={s.muted}>Loading your boards…</div>
+          <div className="eb-muted">Loading your boards…</div>
         ) : boards.length === 0 ? (
-          <div style={s.empty}>
-            <div style={{ fontSize: 15, marginBottom: 14 }}>No boards yet.</div>
-            <button type="button" style={s.newBtn} onClick={onNew}>
+          <div className="eb-empty">
+            <div style={{ fontSize: 15, marginBottom: 16 }}>No boards yet.</div>
+            <button
+              type="button"
+              className="eb-btn eb-btn--primary"
+              onClick={onNew}
+            >
               Create your first board
             </button>
           </div>
         ) : (
-          <div style={s.grid}>
+          <div className="eb-grid eb-stagger">
             {boards.map((b) => (
-              <div key={b.id} style={s.card}>
+              <div key={b.id} className="eb-board">
                 <button
                   type="button"
-                  style={s.thumbBtn}
+                  className="eb-board__thumb"
                   onClick={() => openBoard(b.id)}
                   title={`Open ${b.name}`}
                 >
                   {thumbs[b.id] ? (
-                    <img src={thumbs[b.id]} alt="" style={s.thumbImg} />
+                    <img src={thumbs[b.id]} alt="" />
                   ) : (
-                    <div style={s.thumbPlaceholder}>
+                    <div className="eb-board__ph">
                       {b.name.slice(0, 1).toUpperCase()}
                     </div>
                   )}
                 </button>
-                <div style={s.cardFoot}>
-                  <div style={s.cardMeta}>
-                    <div style={s.cardName} title={b.name}>
+                <div className="eb-board__foot">
+                  <div style={{ minWidth: 0 }}>
+                    <div className="eb-board__name" title={b.name}>
                       {b.name}
                     </div>
-                    <div style={s.cardTime}>{timeAgo(b.updatedAt)}</div>
+                    <div className="eb-board__time">{timeAgo(b.updatedAt)}</div>
                   </div>
-                  <div style={s.cardActions}>
+                  <div className="eb-board__actions">
                     <button
                       type="button"
-                      style={s.iconBtn}
+                      className="eb-icon-btn"
                       onClick={() => onRename(b)}
                       title="Rename"
+                      aria-label={`Rename ${b.name}`}
                     >
                       ✎
                     </button>
                     <button
                       type="button"
-                      style={{ ...s.iconBtn, color: "#b42318" }}
+                      className="eb-icon-btn eb-icon-btn--danger"
                       onClick={() => onDelete(b)}
                       title="Delete"
+                      aria-label={`Delete ${b.name}`}
                     >
                       🗑
                     </button>
@@ -218,111 +231,4 @@ export const BoardsDashboard: React.FC<{ email?: string | null }> = ({
       </div>
     </div>
   );
-};
-
-const s: Record<string, React.CSSProperties> = {
-  page: {
-    minHeight: "100vh",
-    background: "#f7f7fb",
-    fontFamily: "system-ui, sans-serif",
-    color: "#1b1b1f",
-  },
-  bar: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "14px 22px",
-    background: "#fff",
-    borderBottom: "1px solid #ececf3",
-  },
-  brand: { fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" },
-  barRight: { display: "flex", alignItems: "center", gap: 14 },
-  email: { fontSize: 13, color: "#6b7280" },
-  signout: {
-    background: "none",
-    border: "none",
-    color: "#b42318",
-    cursor: "pointer",
-    fontWeight: 600,
-    fontSize: 13,
-  },
-  wrap: { maxWidth: 1080, margin: "28px auto", padding: "0 20px" },
-  head: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 22,
-  },
-  title: { fontSize: 22, fontWeight: 700, margin: 0 },
-  newBtn: {
-    background: "#6965db",
-    color: "#fff",
-    border: "none",
-    borderRadius: 10,
-    padding: "10px 16px",
-    fontSize: 14,
-    fontWeight: 600,
-    cursor: "pointer",
-  },
-  muted: { color: "#9ca3af", fontSize: 14 },
-  empty: { textAlign: "center", padding: "80px 0", color: "#6b7280" },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-    gap: 18,
-  },
-  card: {
-    background: "#fff",
-    borderRadius: 12,
-    border: "1px solid #ececf3",
-    overflow: "hidden",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-  },
-  thumbBtn: {
-    display: "block",
-    width: "100%",
-    height: 140,
-    padding: 0,
-    border: "none",
-    cursor: "pointer",
-    background: "#f3f4f6",
-  },
-  thumbImg: { width: "100%", height: "100%", objectFit: "cover" },
-  thumbPlaceholder: {
-    width: "100%",
-    height: "100%",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 40,
-    fontWeight: 700,
-    color: "#c4c2e8",
-    background: "linear-gradient(135deg,#ece9ff,#f5f3ff)",
-  },
-  cardFoot: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "10px 12px",
-    gap: 8,
-  },
-  cardMeta: { minWidth: 0 },
-  cardName: {
-    fontSize: 14,
-    fontWeight: 600,
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-  },
-  cardTime: { fontSize: 12, color: "#9ca3af", marginTop: 2 },
-  cardActions: { display: "flex", gap: 2, flexShrink: 0 },
-  iconBtn: {
-    background: "none",
-    border: "none",
-    cursor: "pointer",
-    fontSize: 14,
-    padding: 4,
-    borderRadius: 6,
-    color: "#6b7280",
-  },
 };
