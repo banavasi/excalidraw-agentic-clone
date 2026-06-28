@@ -25,6 +25,12 @@ export const AppMainMenu: React.FC<{
 }> = React.memo((props) => {
   return (
     <MainMenu>
+      <MainMenu.Item
+        icon={gridIcon}
+        onSelect={() => window.location.assign("/boards")}
+      >
+        All boards
+      </MainMenu.Item>
       {props.onWorkboards && (
         <>
           <MainMenu.Item icon={gridIcon} onSelect={props.onWorkboards}>
